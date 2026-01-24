@@ -1,0 +1,15 @@
+# Dependências Node
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+env/
+
+# Variáveis de ambiente (Segurança!)
+.env
+.DS_Store

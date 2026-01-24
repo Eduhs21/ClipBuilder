@@ -1,0 +1,22 @@
+Discord	com.discordapp.Discord	0.0.121	stable	flathub	system
+Hytale Launcher	com.hypixel.HytaleLauncher		master	hytalelauncher-origin	system
+Spotify	com.spotify.Client	1.2.74.477.g3be53afe	stable	flathub	system
+Visual Studio Code	com.visualstudio.code	1.108.1	stable	flathub	system
+Vivaldi	com.vivaldi.Vivaldi	7.7.3851.67	stable	flathub	system
+DBeaver Community	io.dbeaver.DBeaverCommunity	25.3.3	stable	flathub	system
+Freedesktop Platform	org.freedesktop.Platform	freedesktop-sdk-24.08.29	24.08	flathub	system
+Freedesktop Platform	org.freedesktop.Platform	freedesktop-sdk-25.08.7	25.08	flathub	system
+Mesa	org.freedesktop.Platform.GL.default	25.3.3	24.08	flathub	system
+Mesa (Extra)	org.freedesktop.Platform.GL.default	25.3.3	24.08extra	flathub	system
+Mesa	org.freedesktop.Platform.GL.default	25.3.3	25.08	flathub	system
+Mesa (Extra)	org.freedesktop.Platform.GL.default	25.3.3	25.08-extra	flathub	system
+nvidia-580-119-02	org.freedesktop.Platform.GL.nvidia-580-119-02		1.4	flathub	system
+Nvidia VAAPI driver	org.freedesktop.Platform.VAAPI.nvidia		25.08	flathub	system
+Codecs Extra Extension	org.freedesktop.Platform.codecs-extra		25.08-extra	flathub	system
+FFmpeg extension with extra codecs	org.freedesktop.Platform.ffmpeg-full		24.08	flathub	system
+openh264	org.freedesktop.Platform.openh264	2.4.1	2.4.1	flathub	system
+openh264	org.freedesktop.Platform.openh264	2.5.1	2.5.1	flathub	system
+Freedesktop SDK	org.freedesktop.Sdk	freedesktop-sdk-25.08.7	25.08	flathub	system
+GNOME Application Platform version 48	org.gnome.Platform		48	flathub	system
+GNOME Application Platform version 49	org.gnome.Platform		49	flathub	system
+Remmina	org.remmina.Remmina	1.4.41	stable	flathub	system
