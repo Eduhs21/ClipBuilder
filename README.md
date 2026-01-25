@@ -2,9 +2,48 @@
 
 ClipBuilder transforma vídeos em tutoriais passo‑a‑passo e exporta em **HTML / DOCX / PDF / texto / ZIP**.
 
-Este README tem **somente** as instruções para subir com **Docker Compose**.
+O foco deste README é te mostrar como subir o projeto com Docker, mas também descreve rapidamente como a ferramenta funciona e o stack utilizado.
 
-## 1) Pré‑requisitos
+## Como funciona
+
+1) Você faz **upload** de um vídeo (MP4/MKV) ou **importa do YouTube**.
+2) O app permite **capturar frames** do vídeo e organizar em uma lista de “passos”.
+3) Para cada passo, você pode:
+	- escrever/editar a descrição manualmente
+	- pedir para a IA (Gemini) gerar a descrição com base no **timestamp**
+	- editar a imagem do passo (corte/anotações)
+4) No fim, você exporta o tutorial em:
+	- **Markdown** (inclui opção de ZIP com imagens)
+	- **HTML**
+	- **DOCX (Word)**
+	- **PDF**
+	- **Texto simples**
+
+## O que foi usado (stack)
+
+**Frontend**
+- React + Vite
+- TailwindCSS (com variáveis CSS para tema claro/escuro)
+- Nginx (em produção via Docker) com proxy `/api` → backend
+
+**Backend**
+- Python + FastAPI (API HTTP)
+- Gemini (SDK `google.generativeai`) para geração de texto
+- `ffmpeg` para suporte a vídeo
+- `yt-dlp` para importação do YouTube (com suporte a cookies quando necessário)
+
+**Exportação**
+- Markdown/HTML/texto: geração direta no backend
+- DOCX: `python-docx` (e suporte a imagens)
+- PDF: `reportlab` (com fontes DejaVu no container para PT-BR)
+
+**Infra/Deploy**
+- Docker Compose (frontend + backend)
+- Upload de arquivos grandes: limites configurados (padrão 6GB)
+
+## Subir com Docker (passo a passo)
+
+### 1) Pré‑requisitos
 
 - Docker Engine instalado e rodando
 - Docker Compose (plugin) disponível
@@ -16,7 +55,7 @@ docker --version
 docker compose version
 ```
 
-## 2) Subir o projeto com Docker
+### 2) Subir o projeto com Docker
 
 ### 2.1) Entre na pasta do projeto
 
@@ -56,7 +95,7 @@ sudo docker compose up -d --build
 
 Observação: o frontend roda com Nginx e encaminha chamadas `/api` para o backend.
 
-## 3) Comandos úteis (status, logs, parar, reiniciar)
+### 3) Comandos úteis (status, logs, parar, reiniciar)
 
 ### Ver status
 
@@ -113,7 +152,7 @@ sudo docker compose up -d --build --force-recreate frontend
 sudo docker compose up -d --build --force-recreate backend
 ```
 
-## 4) Onde ficam os dados/logs
+### 4) Onde ficam os dados/logs
 
 Por padrão, o Compose monta:
 
@@ -122,7 +161,7 @@ Por padrão, o Compose monta:
 
 Em Fedora/RHEL com SELinux, os mounts usam `:Z` (já configurado no [docker-compose.yml](docker-compose.yml)).
 
-## 5) Configurações mais comuns (no backend/.env)
+### 5) Configurações mais comuns (no backend/.env)
 
 Além de `GOOGLE_API_KEY`, você pode definir no `backend/.env` (opcional):
 
@@ -132,7 +171,7 @@ Além de `GOOGLE_API_KEY`, você pode definir no `backend/.env` (opcional):
 
 O Compose já exporta defaults e usa o `backend/.env` via `env_file`.
 
-## 6) Troubleshooting (Docker)
+### 6) Troubleshooting (Docker)
 
 ### “permission denied” no docker.sock
 
