@@ -2,8 +2,6 @@
 
 ClipBuilder transforma vídeos em tutoriais passo‑a‑passo e exporta em **HTML / DOCX / PDF / texto / ZIP**.
 
-O foco deste README é te mostrar como subir o projeto com Docker, mas também descreve rapidamente como a ferramenta funciona e o stack utilizado.
-
 ## Como funciona
 
 1) Você faz **upload** de um vídeo (MP4/MKV) ou **importa do YouTube**.
