@@ -37,6 +37,26 @@ npm run dev
 
 - UI: http://localhost:5173
 
+## Rodar com Docker (recomendado para servidor)
+
+1) Crie um arquivo `.env` na raiz do repo com a chave do Gemini:
+
+```bash
+GOOGLE_API_KEY=SEU_TOKEN_AQUI
+```
+
+2) Suba tudo com um comando:
+
+```bash
+docker compose up -d --build
+```
+
+3) Abra:
+
+- http://localhost:8080 (frontend)
+
+Observação: o frontend usa `/api` por padrão e o `nginx` no container faz proxy para o backend.
+
 ## Configuração
 
 ### Backend (.env)

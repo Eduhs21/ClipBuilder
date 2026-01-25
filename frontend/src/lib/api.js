@@ -19,7 +19,9 @@ function resolveDefaultBaseUrl() {
     if (stored) return stored
   } catch {}
 
-  return 'http://127.0.0.1:8000'
+  // Default to same-origin proxy (works in Docker via nginx: /api -> backend:8000)
+  // In dev, Vite proxies /api to http://127.0.0.1:8000 (see vite.config.js)
+  return '/api'
 }
 
 export const api = axios.create({

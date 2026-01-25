@@ -1,0 +1,40 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      # Required for Gemini
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      # Optional tuning
+      - CLIPBUILDER_DATA_DIR=/app/data
+      - CLIPBUILDER_LOG_DIR=/app/logs
+      - CLIPBUILDER_GEMINI_MODEL=${CLIPBUILDER_GEMINI_MODEL:-models/gemini-2.5-flash}
+      - CLIPBUILDER_MAX_VIDEO_BYTES=${CLIPBUILDER_MAX_VIDEO_BYTES:-734003200}
+      # Optional yt-dlp cookies
+      - CLIPBUILDER_YTDLP_COOKIES_FILE=${CLIPBUILDER_YTDLP_COOKIES_FILE:-}
+      - CLIPBUILDER_YTDLP_COOKIES_FROM_BROWSER=${CLIPBUILDER_YTDLP_COOKIES_FROM_BROWSER:-}
+      - CLIPBUILDER_YTDLP_COOKIES_FROM_BROWSER_ARGS=${CLIPBUILDER_YTDLP_COOKIES_FROM_BROWSER_ARGS:-}
+    volumes:
+      - ./backend/data:/app/data
+      - ./backend/logs:/app/logs
+      # If you use CLIPBUILDER_YTDLP_COOKIES_FILE, mount it (example):
+      # - /abs/path/cookies.txt:/run/secrets/ytdlp_cookies.txt:ro
+    expose:
+      - "8000"
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+
+# Usage:
+# 1) Create a .env file at repo root with GOOGLE_API_KEY=...
+# 2) docker compose up -d --build
+# 3) Open http://localhost:8080
