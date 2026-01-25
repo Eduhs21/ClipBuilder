@@ -25,6 +25,18 @@ uvicorn main:app --reload --port 8000
 - Health check: http://localhost:8000/health
 - Export: `POST /export` (multipart: `steps` JSON + `images[]`)
 
+### Exportação (`POST /export`)
+
+Campos principais:
+- `steps` (string JSON)
+- `images[]` (arquivos PNG, somente para passos com `has_image=true`)
+- `image_name_prefix` (opcional)
+- `output_format`: `markdown` (ZIP), `html`, `docx`, `pdf`, `plain`
+
+Observações:
+- `markdown` retorna um ZIP com `tutorial.md` + pasta `img/`.
+- `pdf` é gerado via ReportLab (no Docker já inclui fonte DejaVu para acentos/pt-BR).
+
 ## Áudio-to-Text
 
 AI Analysis (Gemini):

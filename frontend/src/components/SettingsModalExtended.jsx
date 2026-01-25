@@ -137,6 +137,7 @@ export default function SettingsModalExtended({ open, onClose, aiContext, setAiC
             <option value="markdown">Markdown</option>
             <option value="docx">Word (DOCX)</option>
             <option value="html">HTML</option>
+            <option value="pdf">PDF</option>
             <option value="plain">Texto simples</option>
           </select>
           <div className="text-xs mt-1" style={{ color: 'var(--muted-text)' }}>Escolha o formato no qual o conteúdo exportado/gerado deverá ser produzido.</div>

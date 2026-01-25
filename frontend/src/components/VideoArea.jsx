@@ -12,24 +12,24 @@ export default function VideoArea({ videoUrl, videoRef, canvasRef, onPickVideo, 
               accept="video/mp4,video/x-matroska,.mp4,.mkv"
               onChange={(e) => onPickVideo(e.target.files?.[0] ?? null)}
             />
-            <div className="rounded-full bg-gray-700 px-4 py-2 text-base font-semibold text-white">Upload</div>
+            <div className="cb-btn cb-btn-primary cb-pill text-base">Upload</div>
           </label>
 
-          <div className={`px-3 py-2 text-sm rounded ${darkMode ? 'text-white' : 'text-slate-700'}`}>
+          <div className="px-3 py-2 text-sm rounded" style={{ color: darkMode ? 'rgba(255,255,255,0.85)' : 'var(--muted-text)' }}>
             {aiStatus === 'uploading' || aiStatus === 'processing' ? (
-              <div className="inline-flex items-center gap-2 text-gray-200">
-                <svg className="h-4 w-4 animate-spin text-gray-200" viewBox="0 0 24 24">
+              <div className="inline-flex items-center gap-2" style={{ color: darkMode ? '#e5e7eb' : 'var(--muted-text)' }}>
+                <svg className="h-4 w-4 animate-spin" style={{ color: 'var(--spinner)' }} viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"></circle>
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
                 </svg>
                 {youtubeImporting ? 'Baixando vídeo...' : 'Processando IA'}
               </div>
             ) : aiStatus === 'ready' ? (
-              <div className="inline-flex items-center gap-2 text-gray-200">IA pronta</div>
+              <div className="inline-flex items-center gap-2" style={{ color: darkMode ? '#e5e7eb' : 'var(--muted-text)' }}>IA pronta</div>
             ) : aiStatus === 'error' ? (
-              <div className="inline-flex items-center gap-2 text-red-700">Falha na IA</div>
+              <div className="inline-flex items-center gap-2" style={{ color: darkMode ? '#fca5a5' : '#b91c1c' }}>Falha na IA</div>
             ) : (
-              <div className="text-slate-500">IA: —</div>
+              <div style={{ color: 'var(--muted-text)' }}>IA: —</div>
             )}
           </div>
         </div>
@@ -51,7 +51,7 @@ export default function VideoArea({ videoUrl, videoRef, canvasRef, onPickVideo, 
             type="button"
             onClick={() => onImportYoutube?.()}
             disabled={!!youtubeImporting}
-            className="rounded border px-4 py-2 text-sm font-semibold"
+            className="cb-btn"
           >
             {youtubeImporting ? 'Importando...' : 'Importar'}
           </button>

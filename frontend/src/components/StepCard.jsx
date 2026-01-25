@@ -4,7 +4,7 @@ export default function StepCard({ s, idx, updateDescription, generateWithAI, re
   const hasTimestamp = Boolean((s?.timestamp || '').trim())
 
   return (
-    <div className={`rounded-md border p-12`} style={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text)' }}>
+    <div className={`rounded-md border p-12 cb-panel`} style={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text)' }}>
       <div className="flex flex-col items-start gap-6">
         {s?.url ? (
           <img src={s.url} alt={`Passo ${idx + 1}`} className="w-full h-96 rounded object-cover" />
@@ -25,7 +25,7 @@ export default function StepCard({ s, idx, updateDescription, generateWithAI, re
           />
           <div className="mt-6 flex gap-4">
             <button
-              className={`rounded-md border px-6 py-4 text-xl font-semibold`}
+              className="cb-btn cb-btn-primary px-6 py-4 text-xl"
               onClick={() => generateWithAI(s.id)}
               type="button"
               disabled={!videoId || !hasTimestamp || aiStatus !== 'ready' || aiStepBusyId === s.id}
@@ -33,7 +33,7 @@ export default function StepCard({ s, idx, updateDescription, generateWithAI, re
               {aiStepBusyId === s.id ? 'Gerando...' : 'Gerar com IA'}
             </button>
             <button
-              className={`rounded-md border px-6 py-4 text-xl font-semibold ${darkMode ? 'text-red-300' : 'text-red-700'}`}
+              className="cb-btn cb-btn-danger px-6 py-4 text-xl"
               onClick={() => removeStep(s.id)}
               type="button"
             >

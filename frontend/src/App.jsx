@@ -308,7 +308,7 @@ export default function App() {
       const status = e?.response?.status
       const detail = e?.response?.data?.detail
       if (status === 413) {
-        setAiError('Vídeo muito grande para processar.')
+        setAiError(detail || 'Vídeo muito grande para processar.')
       } else {
         setAiError(detail ? `Falha ao processar com IA: ${detail}` : 'Falha ao processar com IA. Verifique o backend.')
       }
@@ -555,7 +555,7 @@ export default function App() {
 
         const cd = res?.headers?.['content-disposition']
         const serverName = parseFilenameFromContentDisposition(cd)
-        const fallbackName = (outputFormat === 'html' ? 'tutorial.html' : outputFormat === 'docx' ? 'tutorial.docx' : outputFormat === 'plain' ? 'tutorial.txt' : 'clipbuilder_export.zip')
+        const fallbackName = (outputFormat === 'html' ? 'tutorial.html' : outputFormat === 'docx' ? 'tutorial.docx' : outputFormat === 'pdf' ? 'tutorial.pdf' : outputFormat === 'plain' ? 'tutorial.txt' : 'clipbuilder_export.zip')
         downloadBlob(res.data, serverName || fallbackName)
       } catch (e) {
         const status = e?.response?.status
@@ -604,7 +604,7 @@ export default function App() {
         <Header darkMode={darkMode} setDarkMode={setDarkMode} stepsCount={steps.length} exportDoc={exportDoc} busy={busy} />
 
         <main className="mx-auto grid max-w-6xl grid-cols-1 gap-4 px-4 py-4 lg:grid-cols-[1fr_360px]">
-          <section className={`rounded-lg border p-6`} style={{ backgroundColor: 'var(--panel)', borderColor: 'var(--panel-border)' }}>
+          <section className={`rounded-lg border p-6 cb-panel`} style={{ backgroundColor: 'var(--panel)', borderColor: 'var(--panel-border)' }}>
             <div className="flex flex-col items-center gap-6">
               <VideoArea
                 videoUrl={videoUrl}

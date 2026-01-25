@@ -1,6 +1,6 @@
 # ClipBuilder
 
-ClipBuilder transforma vídeos em tutoriais visuais passo‑a‑passo: você faz upload/importa um vídeo, captura frames como passos, gera descrições com IA (Gemini) e exporta em **HTML / DOCX / texto / ZIP**.
+ClipBuilder transforma vídeos em tutoriais visuais passo‑a‑passo: você faz upload/importa um vídeo, captura frames como passos, gera descrições com IA (Gemini) e exporta em **HTML / DOCX / PDF / texto / ZIP**.
 
 ## Estrutura
 
@@ -39,17 +39,41 @@ npm run dev
 
 ## Rodar com Docker (recomendado para servidor)
 
-1) Crie um arquivo `.env` na raiz do repo com a chave do Gemini:
+1) Crie `backend/.env` (arquivo local, ignorado pelo git) com a chave do Gemini:
 
 ```bash
 GOOGLE_API_KEY=SEU_TOKEN_AQUI
 ```
+
+Dica: você pode copiar de `backend/.env.example`.
 
 2) Suba tudo com um comando:
 
 ```bash
 docker compose up -d --build
 ```
+
+### Reiniciar só o ClipBuilder (Docker Compose)
+
+```bash
+cd "/caminho/para/Projeto DOC"
+sudo docker compose down
+sudo docker compose up -d --build
+```
+
+Ver status:
+
+```bash
+sudo docker compose ps
+```
+
+Se você ver o erro `permission denied while trying to connect to the Docker daemon socket`, use `sudo` como acima ou dê permissão ao seu usuário:
+
+```bash
+sudo usermod -aG docker $USER
+```
+
+Depois faça logout/login (ou reinicie a sessão) para o grupo surtir efeito.
 
 3) Abra:
 
@@ -85,12 +109,14 @@ O frontend salva preferências no navegador. As principais são:
 2. Capture frames (atalho `S`) e ajuste os passos.
 3. Gere descrições com IA por timestamp (configurável no modal).
 4. Exporte em HTML/DOCX/texto ou ZIP.
+	- Também suporta PDF.
 
 ## Troubleshooting
 
 - **Gemini 429 (quota/rate limit)**: é limite do provedor; aguarde/reset e/ou ajuste billing/limites da chave.
 - **YouTube “not a bot”**: configure cookies do `yt-dlp` via `CLIPBUILDER_YTDLP_COOKIES_FILE` ou `CLIPBUILDER_YTDLP_COOKIES_FROM_BROWSER`.
 - **Erros de vídeo**: confirme que `ffmpeg` está instalado e que `CLIPBUILDER_DATA_DIR` tem espaço em disco.
+- **Docker “permission denied”**: rode com `sudo docker compose ...` ou adicione seu usuário ao grupo `docker` e relogue.
 
 ## Licença
 

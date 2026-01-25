@@ -125,6 +125,8 @@ DEFAULT_GEMINI_MODEL = os.getenv("CLIPBUILDER_GEMINI_MODEL", "models/gemini-2.5-
 GEMINI_POLL_TIMEOUT_SECONDS = 300
 GEMINI_POLL_INTERVAL_SECONDS = 2
 
+AI_LANGUAGE = (os.getenv("CLIPBUILDER_AI_LANGUAGE") or "pt-BR").strip() or "pt-BR"
+
 YTDLP_COOKIES_FILE = (os.getenv("CLIPBUILDER_YTDLP_COOKIES_FILE") or "").strip()
 YTDLP_COOKIES_FROM_BROWSER = (os.getenv("CLIPBUILDER_YTDLP_COOKIES_FROM_BROWSER") or "").strip()
 YTDLP_COOKIES_FROM_BROWSER_ARGS = (os.getenv("CLIPBUILDER_YTDLP_COOKIES_FROM_BROWSER_ARGS") or "").strip()
@@ -459,20 +461,33 @@ def _describe_at_timestamp(*, gemini_file_name: str, timestamp: str, clip_second
         normalized_model = f"models/{normalized_model}"
 
     file_ref = genai.get_file(gemini_file_name)
+    language_instruction = (
+        f"Responda sempre em português do Brasil (pt-BR). "
+        f"Idioma preferido: {AI_LANGUAGE}. "
+        "Mesmo que o pedido esteja em outro idioma, responda em português."
+    )
+
+    output_style_instruction = (
+        "Escreva apenas o processo (passo a passo), com foco no procedimento e nos comandos/menus/opções relevantes. "
+        "Não faça narração; não descreva o que está na tela; não descreva movimentos do mouse/cursor; "
+        "não mencione 'vídeo', 'clipe', 'cena', 'tela' ou 'o usuário'. "
+        "Evite detalhes supérfluos como posições específicas (ex.: 'célula A1', coordenadas, "
+        "'o cursor posiciona...'), a menos que seja indispensável para executar o procedimento. "
+        "Seja conciso: preferir 3 a 10 passos curtos. Use verbos no imperativo."
+    )
+
     base_parts: list[str] = [
-        "Analise o vídeo e o áudio.",
-        f"O arquivo enviado é um recorte (~{int(clip_seconds)}s) do vídeo original.",
+        language_instruction,
+        output_style_instruction,
     ]
     if include_timestamp:
-        base_parts.append(f"O recorte é centrado no timestamp {timestamp}.")
-        base_parts.append(f"Descreva detalhadamente, em estilo tutorial técnico, o procedimento que está sendo executado especificamente no timestamp {timestamp}.")
+        base_parts.append(f"Descreva o procedimento que está sendo executado especificamente no momento {timestamp}.")
     else:
-        base_parts.append("Descreva detalhadamente, em estilo tutorial técnico, o procedimento exibido no clipe. Não inclua o timestamp nas descrições.")
-    base_parts.append("Seja direto e instrutivo.")
+        base_parts.append("Descreva o procedimento exibido. Não inclua timestamp na resposta.")
     base = " ".join(base_parts)
 
     if user_prompt and str(user_prompt).strip():
-        prompt = str(user_prompt).strip() + "\n\n" + base
+        prompt = base + "\n\n" + "Contexto extra do usuário (se aplicável):\n" + str(user_prompt).strip()
     else:
         prompt = base
 
@@ -992,8 +1007,8 @@ async def export_documentation(
     parsed_steps = _parse_steps(steps)
 
     fmt = (output_format or "markdown").strip().lower()
-    if fmt not in {"markdown", "html", "docx", "plain"}:
-        raise HTTPException(status_code=400, detail="Invalid output_format. Use markdown, html, docx, or plain.")
+    if fmt not in {"markdown", "html", "docx", "plain", "pdf"}:
+        raise HTTPException(status_code=400, detail="Invalid output_format. Use markdown, html, docx, pdf, or plain.")
 
     prefix = _sanitize_image_prefix(image_name_prefix)
 
@@ -1137,6 +1152,103 @@ async def export_documentation(
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             headers=headers,
         )
+
+    if fmt == "pdf":
+        try:
+            from reportlab.lib.pagesizes import A4
+            from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+            from reportlab.lib.units import inch
+            from reportlab.pdfbase import pdfmetrics
+            from reportlab.pdfbase.ttfonts import TTFont
+            from reportlab.platypus import Image as RLImage
+            from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail="Dependências para PDF não instaladas. Instale reportlab no backend.",
+            ) from exc
+
+        font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+        try:
+            pdfmetrics.registerFont(TTFont("DejaVuSans", font_path))
+            base_font = "DejaVuSans"
+        except Exception:
+            # Fallback to a built-in font if DejaVu isn't available.
+            base_font = "Helvetica"
+
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle(
+            "ClipBuilderTitle",
+            parent=styles["Title"],
+            fontName=base_font,
+        )
+        h2_style = ParagraphStyle(
+            "ClipBuilderH2",
+            parent=styles["Heading2"],
+            fontName=base_font,
+            spaceBefore=12,
+            spaceAfter=6,
+        )
+        body_style = ParagraphStyle(
+            "ClipBuilderBody",
+            parent=styles["BodyText"],
+            fontName=base_font,
+            leading=14,
+        )
+
+        out = io.BytesIO()
+        doc = SimpleDocTemplate(
+            out,
+            pagesize=A4,
+            leftMargin=0.8 * inch,
+            rightMargin=0.8 * inch,
+            topMargin=0.8 * inch,
+            bottomMargin=0.8 * inch,
+            title="Tutorial",
+        )
+
+        story: list[object] = []
+        story.append(Paragraph("Tutorial", title_style))
+        story.append(Spacer(1, 12))
+
+        max_width = doc.width
+        for i, step in enumerate(parsed_steps, start=1):
+            story.append(Paragraph(f"Passo {i}", h2_style))
+
+            desc = (step.description or "").strip() or "(sem descrição)"
+            # Basic HTML escaping for Paragraph
+            esc = (
+                desc.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\n", "<br/>")
+            )
+            story.append(Paragraph(esc, body_style))
+            story.append(Spacer(1, 8))
+
+            if step.has_image:
+                img_bytes = step_index_to_image.get(i)
+                if img_bytes:
+                    # Use Pillow to preserve aspect ratio.
+                    try:
+                        from PIL import Image as PILImage
+
+                        img = PILImage.open(io.BytesIO(img_bytes))
+                        w_px, h_px = img.size
+                    except Exception:
+                        w_px, h_px = (1200, 675)
+
+                    scale = min(1.0, float(max_width) / float(w_px or 1))
+                    w = (w_px or 1) * scale
+                    h = (h_px or 1) * scale
+
+                    story.append(RLImage(io.BytesIO(img_bytes), width=w, height=h))
+                    story.append(Spacer(1, 10))
+
+        doc.build(story)
+        out.seek(0)
+        headers = {"Content-Disposition": 'attachment; filename="tutorial.pdf"'}
+        return StreamingResponse(out, media_type="application/pdf", headers=headers)
 
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:

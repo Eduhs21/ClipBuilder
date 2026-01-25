@@ -13,7 +13,7 @@ export default function Sidebar({ steps = [], selectedStepId, setSelectedStepId,
   const hasSelectedImage = !!selected?.url
 
   return (
-    <aside className={`rounded-lg border p-4 flex flex-col`} style={{ backgroundColor: 'var(--panel)', borderColor: 'var(--panel-border)', color: 'var(--text)' }}>
+    <aside className={`rounded-lg border p-4 flex flex-col cb-panel`} style={{ backgroundColor: 'var(--panel)', borderColor: 'var(--panel-border)', color: 'var(--text)' }}>
       {selected ? (
         <div className="mb-4">
           {hasSelectedImage ? (
@@ -30,8 +30,7 @@ export default function Sidebar({ steps = [], selectedStepId, setSelectedStepId,
                 type="button"
                 onClick={() => onEditImage?.(selected.id)}
                 disabled={!hasSelectedImage}
-                className="rounded-md border px-3 py-2 text-sm font-semibold disabled:opacity-50"
-                style={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text)' }}
+                className="cb-btn"
               >
                 Editar imagem
               </button>
@@ -39,8 +38,7 @@ export default function Sidebar({ steps = [], selectedStepId, setSelectedStepId,
                 type="button"
                 onClick={() => generateWithAI(selected.id)}
                 disabled={!canGenerate}
-                className="rounded-md border px-3 py-2 text-sm font-semibold disabled:opacity-50"
-                style={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text)' }}
+                className="cb-btn cb-btn-primary"
               >
                 {aiStepBusyId === selected.id ? 'Gerando...' : 'Gerar por IA'}
               </button>
@@ -59,8 +57,7 @@ export default function Sidebar({ steps = [], selectedStepId, setSelectedStepId,
             <button
               type="button"
               onClick={() => removeStep(selected.id)}
-              className="rounded-md border px-3 py-2 text-sm font-semibold"
-              style={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--card-border)', color: darkMode ? '#fca5a5' : '#b91c1c' }}
+              className="cb-btn cb-btn-danger"
             >
               Remover passo
             </button>
@@ -73,7 +70,7 @@ export default function Sidebar({ steps = [], selectedStepId, setSelectedStepId,
       <div className="flex-1 overflow-auto">
         <div className="flex flex-col gap-3">
           {steps.map((s, idx) => (
-            <button key={s.id} onClick={() => setSelectedStepId(s.id)} className={`flex items-start gap-3 rounded-md border p-3 text-left w-full`} style={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text)' }}>
+            <button key={s.id} onClick={() => setSelectedStepId(s.id)} className={`flex items-start gap-3 rounded-md border p-3 text-left w-full transition-colors`} style={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text)' }}>
               {s?.url ? (
                 <img src={s.url} alt={`Passo ${idx + 1}`} className="h-20 w-28 rounded object-cover flex-shrink-0" />
               ) : (

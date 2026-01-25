@@ -14,7 +14,10 @@
   --card-border: #e6e9ee;
   --muted-text: #64748b;
   --text: #0f172a;
-  --accent: #374151;
+  --accent: #2563eb;
+  --accent-contrast: #ffffff;
+  --btn-hover-bg: #f1f5f9;
+  --danger: #b91c1c;
   --modal-overlay: rgba(0,0,0,0.5);
   --spinner: #9ca3af;
 }
@@ -28,6 +31,9 @@ html.dark {
   --muted-text: #9ca3af;
   --text: #e6eef8;
   --accent: #9ca3af;
+  --accent-contrast: #111827;
+  --btn-hover-bg: #32383d;
+  --danger: #fca5a5;
   --modal-overlay: rgba(0,0,0,0.65);
   --spinner: #d1d5db;
 }
@@ -35,4 +41,47 @@ html.dark {
 html,
 body {
   height: 100%;
+}
+
+@layer components {
+  .cb-btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-semibold transition-colors;
+    background-color: var(--card-bg);
+    border-color: var(--card-border);
+    color: var(--text);
+  }
+
+  .cb-btn:hover {
+    background-color: var(--btn-hover-bg);
+  }
+
+  .cb-btn:disabled {
+    @apply opacity-50;
+  }
+
+  .cb-btn-primary {
+    background-color: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-contrast);
+  }
+
+  .cb-btn-primary:hover {
+    filter: brightness(0.96);
+  }
+
+  .cb-btn-danger {
+    color: var(--danger);
+  }
+
+  .cb-pill {
+    @apply rounded-full px-4 py-2;
+  }
+
+  .cb-panel {
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06), 0 8px 20px rgba(15, 23, 42, 0.04);
+  }
+
+  html.dark .cb-panel {
+    box-shadow: none;
+  }
 }

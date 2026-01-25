@@ -8,12 +8,12 @@ export default function Header({ darkMode, setDarkMode, stepsCount, exportDoc, b
           <div className="text-2xl font-bold">ClipBuilder</div>
           <button
             onClick={() => setDarkMode((v) => !v)}
-            className="ml-2 rounded px-2 py-1 text-xs border"
+            className="ml-2 cb-btn"
           >
             {darkMode ? 'Light' : 'Dark'}
           </button>
         </div>
-        <div className="text-sm text-slate-400 flex items-center gap-4">
+        <div className="text-sm flex items-center gap-4" style={{ color: 'var(--muted-text)' }}>
           <div>{stepsCount} passos</div>
         </div>
       </div>
