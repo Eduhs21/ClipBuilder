@@ -3,6 +3,10 @@ node_modules/
 npm-debug.log
 yarn-error.log
 
+# Builds
+dist/
+.vite/
+
 # Python
 __pycache__/
 *.py[cod]
@@ -13,3 +17,8 @@ env/
 # Variáveis de ambiente (Segurança!)
 .env
 .DS_Store
+
+# Backend runtime data
+backend/data/
+backend/logs/
+*.log

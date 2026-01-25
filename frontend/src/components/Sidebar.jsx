@@ -1,22 +1,70 @@
 import React from 'react'
 
-export default function Sidebar({ steps = [], selectedStepId, setSelectedStepId, updateDescription, generateWithAI, removeStep, aiStepBusyId, videoId, aiStatus, darkMode }) {
+export default function Sidebar({ steps = [], selectedStepId, setSelectedStepId, updateDescription, generateWithAI, removeStep, aiStepBusyId, videoId, aiStatus, darkMode, onEditImage }) {
   const selected = steps.find((s) => s.id === selectedStepId) || steps[0] || null
+  const canGenerate =
+    !!selected &&
+    !!videoId &&
+    aiStatus === 'ready' &&
+    aiStepBusyId !== selected?.id &&
+    typeof selected?.seconds === 'number' &&
+    !!selected?.timestamp
+
+  const hasSelectedImage = !!selected?.url
 
   return (
-    <aside className={`rounded-lg border p-4 flex flex-col`} style={{ backgroundColor: darkMode ? '#2b2b2b' : undefined, borderColor: darkMode ? '#444' : undefined }}>
+    <aside className={`rounded-lg border p-4 flex flex-col`} style={{ backgroundColor: 'var(--panel)', borderColor: 'var(--panel-border)', color: 'var(--text)' }}>
       {selected ? (
         <div className="mb-4">
-          <img src={selected.url} alt="selected" className="w-full h-64 rounded object-cover mb-4" />
-          <div className="mb-2 text-2xl font-semibold">Passo {steps.indexOf(selected) + 1} • {selected.timestamp}</div>
+          {hasSelectedImage ? (
+            <img src={selected.url} alt="selected" className="w-full h-64 rounded object-cover mb-4" />
+          ) : (
+            <div className="w-full h-64 rounded mb-4 flex items-center justify-center border" style={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--muted-text)' }}>
+              Passo sem imagem
+            </div>
+          )}
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <div className="text-2xl font-semibold">Passo {steps.indexOf(selected) + 1} • {selected.timestamp}</div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => onEditImage?.(selected.id)}
+                disabled={!hasSelectedImage}
+                className="rounded-md border px-3 py-2 text-sm font-semibold disabled:opacity-50"
+                style={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text)' }}
+              >
+                Editar imagem
+              </button>
+              <button
+                type="button"
+                onClick={() => generateWithAI(selected.id)}
+                disabled={!canGenerate}
+                className="rounded-md border px-3 py-2 text-sm font-semibold disabled:opacity-50"
+                style={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text)' }}
+              >
+                {aiStepBusyId === selected.id ? 'Gerando...' : 'Gerar por IA'}
+              </button>
+            </div>
+          </div>
           <textarea
             className="w-full resize-none rounded-md border px-5 py-4 text-lg outline-none focus:ring-2"
             rows={8}
             placeholder="Descreva o passo..."
             value={selected.description}
             onChange={(e) => updateDescription(selected.id, e.target.value)}
-            style={darkMode ? { backgroundColor: '#343434', borderColor: '#555', color: '#e6e6e6' } : undefined}
+            style={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text)' }}
           />
+
+          <div className="mt-3 flex items-center justify-end">
+            <button
+              type="button"
+              onClick={() => removeStep(selected.id)}
+              className="rounded-md border px-3 py-2 text-sm font-semibold"
+              style={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--card-border)', color: darkMode ? '#fca5a5' : '#b91c1c' }}
+            >
+              Remover passo
+            </button>
+          </div>
         </div>
       ) : (
         <div className="mb-4 text-sm text-slate-400">Nenhum passo selecionado</div>
@@ -25,8 +73,14 @@ export default function Sidebar({ steps = [], selectedStepId, setSelectedStepId,
       <div className="flex-1 overflow-auto">
         <div className="flex flex-col gap-3">
           {steps.map((s, idx) => (
-            <button key={s.id} onClick={() => setSelectedStepId(s.id)} className={`flex items-start gap-3 rounded-md border p-3 text-left w-full ${darkMode ? 'text-slate-100' : 'bg-white'}`} style={darkMode ? { backgroundColor: '#343434', borderColor: '#555' } : undefined}>
-              <img src={s.url} alt={`Passo ${idx + 1}`} className="h-20 w-28 rounded object-cover flex-shrink-0" />
+            <button key={s.id} onClick={() => setSelectedStepId(s.id)} className={`flex items-start gap-3 rounded-md border p-3 text-left w-full`} style={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text)' }}>
+              {s?.url ? (
+                <img src={s.url} alt={`Passo ${idx + 1}`} className="h-20 w-28 rounded object-cover flex-shrink-0" />
+              ) : (
+                <div className="h-20 w-28 rounded flex-shrink-0 border grid place-items-center text-xs" style={{ backgroundColor: 'rgba(0,0,0,0.10)', borderColor: 'var(--card-border)', color: 'var(--muted-text)' }}>
+                  Texto
+                </div>
+              )}
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between">
                   <div className="text-sm font-semibold">Passo {idx + 1}</div>

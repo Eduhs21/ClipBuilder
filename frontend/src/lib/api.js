@@ -1,5 +1,10 @@
 import axios from 'axios'
 
+const LS = {
+  apiUrl: 'CLIPBUILDER_API_URL',
+  googleApiKey: 'CLIPBUILDER_GOOGLE_API_KEY'
+}
+
 // Determine default baseURL from Vite env, localStorage, or fallback
 function resolveDefaultBaseUrl() {
   try {
@@ -10,7 +15,7 @@ function resolveDefaultBaseUrl() {
   } catch {}
 
   try {
-    const stored = localStorage.getItem('DOCUVIDEO_API_URL')
+    const stored = localStorage.getItem(LS.apiUrl)
     if (stored) return stored
   } catch {}
 
@@ -25,10 +30,14 @@ export function setApiUrl(url) {
   const u = (url || '').toString().trim()
   if (u) {
     api.defaults.baseURL = u
-    try { localStorage.setItem('DOCUVIDEO_API_URL', u) } catch {}
+    try {
+      localStorage.setItem(LS.apiUrl, u)
+    } catch {}
   } else {
     delete api.defaults.baseURL
-    try { localStorage.removeItem('DOCUVIDEO_API_URL') } catch {}
+    try {
+      localStorage.removeItem(LS.apiUrl)
+    } catch {}
   }
 }
 
@@ -40,16 +49,20 @@ export function setGoogleApiKey(key) {
   const k = (key || '').toString().trim()
   if (k) {
     api.defaults.headers['X-Google-Api-Key'] = k
-    try { localStorage.setItem('DOCUVIDEO_GOOGLE_API_KEY', k) } catch {}
+    try {
+      localStorage.setItem(LS.googleApiKey, k)
+    } catch {}
   } else {
     if (api.defaults.headers) delete api.defaults.headers['X-Google-Api-Key']
-    try { localStorage.removeItem('DOCUVIDEO_GOOGLE_API_KEY') } catch {}
+    try {
+      localStorage.removeItem(LS.googleApiKey)
+    } catch {}
   }
 }
 
 // Initialize from localStorage if present
 try {
-  const storedKey = localStorage.getItem('DOCUVIDEO_GOOGLE_API_KEY') || ''
+  const storedKey = localStorage.getItem(LS.googleApiKey) || ''
   if (storedKey) api.defaults.headers['X-Google-Api-Key'] = storedKey
 } catch (e) {
   // ignore (SSR or restricted env)
@@ -57,8 +70,12 @@ try {
 
 // Expose helper to clear stored credentials
 export function clearStoredConfig() {
-  try { localStorage.removeItem('DOCUVIDEO_GOOGLE_API_KEY') } catch {}
-  try { localStorage.removeItem('DOCUVIDEO_API_URL') } catch {}
+  try {
+    localStorage.removeItem(LS.googleApiKey)
+  } catch {}
+  try {
+    localStorage.removeItem(LS.apiUrl)
+  } catch {}
   if (api.defaults.headers) delete api.defaults.headers['X-Google-Api-Key']
   delete api.defaults.baseURL
 }

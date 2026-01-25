@@ -1,10 +1,41 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { api } from './lib/api'
+import { api, getApiUrl } from './lib/api'
 import Header from './components/Header'
 import VideoArea from './components/VideoArea'
 import StepCard from './components/StepCard'
 import Sidebar from './components/Sidebar'
 import SettingsModal from './components/SettingsModalExtended'
+import ImageEditorModal from './components/ImageEditorModal'
+
+const LS = {
+  geminiModel: 'CLIPBUILDER_GEMINI_MODEL',
+  dark: 'CLIPBUILDER_DARK',
+  savedPrompt: 'CLIPBUILDER_SAVED_PROMPT',
+  aiFillEnabled: 'CLIPBUILDER_AI_FILL_ENABLED',
+  outputFormat: 'CLIPBUILDER_OUTPUT_FORMAT',
+  imageNamePrefix: 'CLIPBUILDER_IMAGE_NAME_PREFIX',
+  includeTimestamp: 'CLIPBUILDER_INCLUDE_TIMESTAMP'
+}
+
+function lsGet(key) {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function lsSet(key, value) {
+  try {
+    localStorage.setItem(key, value)
+  } catch {}
+}
+
+function lsRemove(key) {
+  try {
+    localStorage.removeItem(key)
+  } catch {}
+}
 
 function formatBytes(bytes) {
   if (!Number.isFinite(bytes)) return ''
@@ -26,7 +57,12 @@ function downloadBlob(blob, filename) {
   document.body.appendChild(a)
   a.click()
   a.remove()
-  URL.revokeObjectURL(url)
+  // Revoke later; immediate revoke can cancel downloads in some browsers.
+  setTimeout(() => {
+    try {
+      URL.revokeObjectURL(url)
+    } catch {}
+  }, 1500)
 }
 
 function formatTimestamp(seconds) {
@@ -40,14 +76,17 @@ function formatTimestamp(seconds) {
 export default function App() {
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
+  const youtubePollRef = useRef(null)
 
   const [videoUrl, setVideoUrl] = useState(null)
   const [videoId, setVideoId] = useState(null)
+  const [youtubeUrl, setYoutubeUrl] = useState('')
+  const [youtubeImporting, setYoutubeImporting] = useState(false)
   const [geminiModel, setGeminiModel] = useState(() => {
-    const stored = localStorage.getItem('DOCUVIDEO_GEMINI_MODEL')
+    const stored = lsGet(LS.geminiModel)
     const allowed = new Set(['models/gemini-2.0-flash', 'models/gemini-2.5-flash', 'models/gemini-2.5-pro'])
     if (stored && allowed.has(stored)) return stored
-    return 'models/gemini-2.0-flash'
+    return 'models/gemini-2.5-flash'
   })
   const [aiStatus, setAiStatus] = useState('idle') // idle|uploading|processing|ready|error
   const [aiError, setAiError] = useState('')
@@ -56,26 +95,44 @@ export default function App() {
   const [busy, setBusy] = useState(false)
   const [selectedStepId, setSelectedStepId] = useState(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [imageEditorOpen, setImageEditorOpen] = useState(false)
+  const [editingStepId, setEditingStepId] = useState(null)
   const [error, setError] = useState('')
   const [capturing, setCapturing] = useState(false)
   const [aiContext, setAiContext] = useState('')
-  const [includeTimestamp, setIncludeTimestamp] = useState(false)
+  const [includeTimestamp, setIncludeTimestamp] = useState(() => {
+    const raw = lsGet(LS.includeTimestamp)
+    if (raw === null || raw === undefined || raw === '') return false
+    return raw === '1' || raw === 'true'
+  })
   const [darkMode, setDarkMode] = useState(() => {
     try {
-      return localStorage.getItem('DOCUVIDEO_DARK') === '1'
+      return lsGet(LS.dark) === '1'
     } catch {
       return false
     }
   })
   const [savedPrompt, setSavedPrompt] = useState(() => {
     try {
-      return localStorage.getItem('DOCUVIDEO_SAVED_PROMPT') || ''
+      return lsGet(LS.savedPrompt) || ''
     } catch {
       return ''
     }
   })
+  const [aiFillEnabled, setAiFillEnabled] = useState(() => {
+    try {
+      const v = lsGet(LS.aiFillEnabled)
+      if (v === null || v === undefined || v === '') return true
+      return v === '1' || v === 'true'
+    } catch {
+      return true
+    }
+  })
   const [outputFormat, setOutputFormat] = useState(() => {
-    try { return localStorage.getItem('DOCUVIDEO_OUTPUT_FORMAT') || 'markdown' } catch { return 'markdown' }
+    try { return lsGet(LS.outputFormat) || 'markdown' } catch { return 'markdown' }
+  })
+  const [imageNamePrefix, setImageNamePrefix] = useState(() => {
+    try { return lsGet(LS.imageNamePrefix) || 'step_' } catch { return 'step_' }
   })
 
   const totalImageBytes = useMemo(() => {
@@ -84,25 +141,51 @@ export default function App() {
 
   useEffect(() => {
     function onKeyDown(e) {
-      if (e.key?.toLowerCase() !== 's') return
-      // Avoid capturing while typing
+      if (e.key === 'Escape' && settingsOpen) {
+        e.preventDefault()
+        setSettingsOpen(false)
+        return
+      }
+
+      // Don't bind global shortcuts while modals are open
+      if (settingsOpen || imageEditorOpen) return
+
+      // Avoid shortcuts while typing
       const el = document.activeElement
       const tag = el?.tagName?.toLowerCase()
-      if (tag === 'textarea' || tag === 'input') return
-      e.preventDefault()
-      captureFrame()
+      const isTyping = tag === 'textarea' || tag === 'input' || el?.isContentEditable
+      if (isTyping) return
+
+      const k = (e.key || '').toLowerCase()
+      if (k === 's') {
+        e.preventDefault()
+        captureFrame()
+        return
+      }
+
+      if (e.key === 'Delete') {
+        if (!selectedStepId) return
+        e.preventDefault()
+        removeStep(selectedStepId)
+      }
     }
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [steps, videoUrl])
+  }, [steps, videoUrl, selectedStepId, settingsOpen, imageEditorOpen])
 
   useEffect(() => {
-    try {
-      if (darkMode) localStorage.setItem('DOCUVIDEO_DARK', '1')
-      else localStorage.removeItem('DOCUVIDEO_DARK')
-    } catch {}
+    if (geminiModel) lsSet(LS.geminiModel, geminiModel)
+  }, [geminiModel])
+
+  useEffect(() => {
+    lsSet(LS.includeTimestamp, includeTimestamp ? '1' : '0')
+  }, [includeTimestamp])
+
+  useEffect(() => {
+    if (darkMode) lsSet(LS.dark, '1')
+    else lsRemove(LS.dark)
     // Toggle html.dark class for global Tailwind support if configured
     try {
       if (darkMode) document.documentElement.classList.add('dark')
@@ -121,13 +204,86 @@ export default function App() {
       return
     }
 
-    if (videoUrl) URL.revokeObjectURL(videoUrl)
+    if (videoUrl && String(videoUrl).startsWith('blob:')) URL.revokeObjectURL(videoUrl)
     setVideoUrl(URL.createObjectURL(file))
     setSteps([])
     setVideoId(null)
     setAiStatus('uploading')
     uploadToGemini(file)
   }
+
+  async function importYoutube() {
+    setError('')
+    setAiError('')
+
+    const url = (youtubeUrl || '').toString().trim()
+    if (!url) {
+      setError('Cole uma URL do YouTube para importar.')
+      return
+    }
+
+    setYoutubeImporting(true)
+    setAiStatus('processing')
+    try {
+      const res = await api.post('/videos/youtube', { url })
+      const id = res?.data?.video_id
+      if (!id) throw new Error('missing video_id')
+
+      if (videoUrl && String(videoUrl).startsWith('blob:')) {
+        try { URL.revokeObjectURL(videoUrl) } catch {}
+      }
+
+      setSteps([])
+      setSelectedStepId(null)
+      setVideoId(id)
+
+      const base = (getApiUrl() || '').replace(/\/$/, '')
+
+      // Poll until backend finishes downloading.
+      if (youtubePollRef.current) {
+        clearInterval(youtubePollRef.current)
+        youtubePollRef.current = null
+      }
+
+      youtubePollRef.current = setInterval(async () => {
+        try {
+          const st = await api.get(`/videos/${id}/status`)
+          const status = st?.data?.status
+          if (status === 'ready') {
+            clearInterval(youtubePollRef.current)
+            youtubePollRef.current = null
+            setVideoUrl(`${base}/videos/${id}/file`)
+            setAiStatus('ready')
+            setYoutubeImporting(false)
+          } else if (status === 'error') {
+            clearInterval(youtubePollRef.current)
+            youtubePollRef.current = null
+            setAiStatus('error')
+            setYoutubeImporting(false)
+            const err = st?.data?.error
+            setAiError(err ? `Falha ao importar do YouTube: ${err}` : 'Falha ao importar do YouTube.')
+          }
+        } catch {
+          // keep polling
+        }
+      }, 1200)
+    } catch (e) {
+      setAiStatus('error')
+      const status = e?.response?.status
+      const detail = e?.response?.data?.detail
+      setAiError(detail ? `Falha ao importar do YouTube: ${detail}` : status ? `Falha ao importar do YouTube (HTTP ${status}).` : 'Falha ao importar do YouTube. Verifique o backend.')
+      setYoutubeImporting(false)
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      if (youtubePollRef.current) {
+        clearInterval(youtubePollRef.current)
+        youtubePollRef.current = null
+      }
+    }
+  }, [])
 
 
 
@@ -197,11 +353,22 @@ export default function App() {
         return
       }
 
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+      try {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+      } catch {
+        setError('Falha ao desenhar o vídeo no canvas. (Possível problema de CORS)')
+        return
+      }
 
-      const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'))
+      let blob = null
+      try {
+        blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'))
+      } catch {
+        setError('Falha ao exportar o frame. (Possível problema de CORS)')
+        return
+      }
       if (!blob) {
-        setError('Falha ao gerar imagem do frame.')
+        setError('Falha ao gerar imagem do frame. (Possível problema de CORS)')
         return
       }
 
@@ -209,7 +376,7 @@ export default function App() {
       const timestamp = formatTimestamp(seconds)
 
       let description = ''
-      if (videoId && aiStatus === 'ready') {
+      if (aiFillEnabled && videoId && aiStatus === 'ready') {
         try {
           const params = { model: geminiModel, t: seconds, include_timestamp: includeTimestamp }
           if (aiContext) params.prompt = aiContext
@@ -236,6 +403,7 @@ export default function App() {
           description,
           timestamp,
           seconds,
+          has_image: true,
         },
       ])
     } finally {
@@ -243,8 +411,41 @@ export default function App() {
     }
   }
 
+  function createTextStep() {
+    setError('')
+    setAiError('')
+    const id = crypto.randomUUID()
+    setSteps((prev) => [
+      ...prev,
+      {
+        id,
+        description: '',
+        timestamp: '',
+        seconds: null,
+        blob: null,
+        url: '',
+        has_image: false,
+      },
+    ])
+    setSelectedStepId(id)
+  }
+
   function updateDescription(id, description) {
     setSteps((prev) => prev.map((s) => (s.id === id ? { ...s, description } : s)))
+  }
+
+  function updateStepImage(id, blob) {
+    if (!blob) return
+    setSteps((prev) => {
+      return prev.map((s) => {
+        if (s.id !== id) return s
+        try {
+          if (s.url) URL.revokeObjectURL(s.url)
+        } catch {}
+        const url = URL.createObjectURL(blob)
+        return { ...s, blob, url, has_image: true }
+      })
+    })
   }
 
   function removeStep(id) {
@@ -295,18 +496,56 @@ export default function App() {
         return
       }
 
+      const parseFilenameFromContentDisposition = (value) => {
+        const cd = (value || '').toString()
+        // RFC 5987 / RFC 6266
+        const mStar = cd.match(/filename\*=UTF-8''([^;\n]+)/i)
+        if (mStar && mStar[1]) {
+          try {
+            return decodeURIComponent(mStar[1].trim().replace(/^"|"$/g, ''))
+          } catch {
+            return mStar[1].trim().replace(/^"|"$/g, '')
+          }
+        }
+        const m = cd.match(/filename=([^;\n]+)/i)
+        if (m && m[1]) return m[1].trim().replace(/^"|"$/g, '')
+        return ''
+      }
+
+      const sanitizePrefix = (raw) => {
+        let v = (raw || '').toString().trim()
+        if (!v) return 'step_'
+        // If user typed an extension, drop it to avoid "foo.png01.png"
+        v = v.replace(/\.png$/i, '')
+        // Remove path separators and keep it filename-friendly
+        v = v.replace(/[\\/]/g, '_')
+        v = v.replace(/\s+/g, '_')
+        v = v.replace(/[^a-zA-Z0-9._-]/g, '_')
+        v = v.slice(0, 60)
+        return v || 'step_'
+      }
+
+      const prefix = sanitizePrefix(imageNamePrefix)
+
       setBusy(true)
       try {
         const form = new FormData()
         form.append(
           'steps',
-          JSON.stringify(steps.map((s) => ({ description: s.description ?? '' })))
+          JSON.stringify(
+            steps.map((s) => ({
+              description: s.description ?? '',
+              has_image: !!(s?.has_image && s?.blob),
+            }))
+          )
         )
+        form.append('image_name_prefix', prefix)
+        form.append('output_format', outputFormat || 'markdown')
 
+        // Only send images for steps that actually have them.
         steps.forEach((s, idx) => {
-          const file = new File([s.blob], `step_${String(idx + 1).padStart(2, '0')}.png`, {
-            type: 'image/png'
-          })
+          if (!s?.blob || !s?.has_image) return
+          const file = new File([s.blob], `${prefix}${String(idx + 1).padStart(2, '0')}.png`, { type: 'image/png' })
           form.append('images', file)
         })
 
@@ -314,13 +553,30 @@ export default function App() {
           responseType: 'blob'
         })
 
-        downloadBlob(res.data, 'docuvideo_export.zip')
+        const cd = res?.headers?.['content-disposition']
+        const serverName = parseFilenameFromContentDisposition(cd)
+        const fallbackName = (outputFormat === 'html' ? 'tutorial.html' : outputFormat === 'docx' ? 'tutorial.docx' : outputFormat === 'plain' ? 'tutorial.txt' : 'clipbuilder_export.zip')
+        downloadBlob(res.data, serverName || fallbackName)
       } catch (e) {
         const status = e?.response?.status
+        let detail = e?.response?.data?.detail
+
+        // When responseType is 'blob', error bodies come as Blob (even for JSON).
+        if (!detail && e?.response?.data instanceof Blob) {
+          try {
+            const text = await e.response.data.text()
+            try {
+              const parsed = JSON.parse(text)
+              detail = parsed?.detail || text
+            } catch {
+              detail = text
+            }
+          } catch {}
+        }
         if (status === 413) {
           setError('Payload muito grande para exportar. Tente menos passos ou frames menores.')
         } else if (status) {
-          setError(`Falha ao exportar (HTTP ${status}).`)
+          setError(detail ? `Falha ao exportar: ${detail}` : `Falha ao exportar (HTTP ${status}).`)
         } else {
           setError('Falha ao exportar. Verifique se o backend está rodando.')
         }
@@ -334,19 +590,31 @@ export default function App() {
       setSelectedStepId(id)
     }
 
+    function handleEditImage(id) {
+      const step = steps.find((s) => s.id === id)
+      if (!step?.url || !step?.blob || !step?.has_image) return
+      setEditingStepId(id)
+      setImageEditorOpen(true)
+    }
+
+    const editingStep = steps.find((s) => s.id === editingStepId) || null
+
     return (
-      <div className={`min-h-screen ${darkMode ? 'text-slate-100' : 'bg-slate-50 text-slate-900'}`} style={{ backgroundColor: darkMode ? '#2b2b2b' : undefined }}>
+      <div className={`min-h-screen ${darkMode ? 'text-slate-100' : 'bg-slate-50 text-slate-900'}`} style={{ backgroundColor: 'var(--bg)', color: 'var(--text)' }}>
         <Header darkMode={darkMode} setDarkMode={setDarkMode} stepsCount={steps.length} exportDoc={exportDoc} busy={busy} />
 
         <main className="mx-auto grid max-w-6xl grid-cols-1 gap-4 px-4 py-4 lg:grid-cols-[1fr_360px]">
-          <section className={`rounded-lg border p-6`} style={{ backgroundColor: darkMode ? '#2b2b2b' : undefined, borderColor: darkMode ? '#444' : undefined }}>
+          <section className={`rounded-lg border p-6`} style={{ backgroundColor: 'var(--panel)', borderColor: 'var(--panel-border)' }}>
             <div className="flex flex-col items-center gap-6">
               <VideoArea
                 videoUrl={videoUrl}
                 videoRef={videoRef}
                 canvasRef={canvasRef}
                 onPickVideo={onPickVideo}
-                captureFrame={captureFrame}
+                youtubeUrl={youtubeUrl}
+                setYoutubeUrl={setYoutubeUrl}
+                onImportYoutube={importYoutube}
+                youtubeImporting={youtubeImporting}
                 capturing={capturing}
                 aiStatus={aiStatus}
                 darkMode={darkMode}
@@ -356,7 +624,7 @@ export default function App() {
                 {steps.length === 0 ? (
                   <div className={`text-sm ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>Capture frames para montar o tutorial.</div>
                 ) : (
-                  <div className="text-sm ${darkMode ? 'text-slate-400' : 'text-slate-500'}">Selecione um passo à direita para editar</div>
+                  <div className={`text-sm ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>Selecione um passo à direita para editar</div>
                 )}
               </div>
               <div className="w-full max-w-[960px] mt-6">
@@ -369,10 +637,16 @@ export default function App() {
                     {capturing ? 'Capturando...' : 'Capturar Novo Passo'}
                   </button>
                   <button
+                    onClick={createTextStep}
+                    className="w-full rounded-md border px-6 py-4 text-lg font-semibold"
+                  >
+                    Novo passo (somente texto)
+                  </button>
+                  <button
                     onClick={() => setSettingsOpen(true)}
                     className="w-full rounded-md border px-6 py-4 text-lg font-semibold"
                   >
-                    ⚙️ Configurações da IA
+                    ⚙️ Configurações
                   </button>
                   <button
                     onClick={exportDoc}
@@ -381,6 +655,17 @@ export default function App() {
                   >
                     {busy ? 'Exportando...' : 'Exportar'}
                   </button>
+
+                  {(error || aiError) ? (
+                    <div className="rounded-md border px-4 py-3 text-sm" style={{ borderColor: 'var(--card-border)', backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
+                      {error ? (
+                        <div className="mb-2" style={{ color: '#ef4444' }}>{error}</div>
+                      ) : null}
+                      {aiError ? (
+                        <div style={{ color: '#f59e0b' }}>{aiError}</div>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -397,6 +682,19 @@ export default function App() {
             videoId={videoId}
             aiStatus={aiStatus}
             darkMode={darkMode}
+            onEditImage={handleEditImage}
+          />
+          <ImageEditorModal
+            open={imageEditorOpen}
+            step={editingStep}
+            onClose={() => {
+              setImageEditorOpen(false)
+              setEditingStepId(null)
+            }}
+            onSave={(blob) => {
+              if (!editingStepId) return
+              updateStepImage(editingStepId, blob)
+            }}
           />
           <SettingsModal
             open={settingsOpen}
@@ -411,6 +709,10 @@ export default function App() {
             setGeminiModel={setGeminiModel}
             outputFormat={outputFormat}
             setOutputFormat={setOutputFormat}
+            imageNamePrefix={imageNamePrefix}
+            setImageNamePrefix={setImageNamePrefix}
+            aiFillEnabled={aiFillEnabled}
+            setAiFillEnabled={setAiFillEnabled}
           />
         </main>
       </div>

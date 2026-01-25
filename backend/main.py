@@ -5,8 +5,10 @@ import json
 import logging
 import logging.handlers
 import os
+import base64
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -16,11 +18,12 @@ from dataclasses import dataclass, field
 from errno import ENOSPC
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import anyio
-from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse
 
@@ -36,10 +39,10 @@ except Exception:
     pass
 
 
-LOG_DIR = Path(os.getenv("DOCUVIDEO_LOG_DIR", Path(__file__).resolve().parent / "logs"))
+LOG_DIR = Path(os.getenv("CLIPBUILDER_LOG_DIR", Path(__file__).resolve().parent / "logs"))
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
-logger = logging.getLogger("docuvideo")
+logger = logging.getLogger("clipbuilder")
 if not logger.handlers:
     logger.setLevel(logging.INFO)
     fmt = logging.Formatter(
@@ -48,7 +51,7 @@ if not logger.handlers:
     )
 
     info_handler = logging.handlers.RotatingFileHandler(
-        LOG_DIR / "docuvideo.log",
+        LOG_DIR / "clipbuilder.log",
         maxBytes=2_000_000,
         backupCount=5,
         encoding="utf-8",
@@ -57,7 +60,7 @@ if not logger.handlers:
     info_handler.setFormatter(fmt)
 
     error_handler = logging.handlers.RotatingFileHandler(
-        LOG_DIR / "docuvideo.error.log",
+        LOG_DIR / "clipbuilder.error.log",
         maxBytes=2_000_000,
         backupCount=10,
         encoding="utf-8",
@@ -110,19 +113,23 @@ def _env_int(name: str, default: int) -> int:
     return value if value > 0 else default
 
 
-MAX_VIDEO_BYTES = _env_int("DOCUVIDEO_MAX_VIDEO_BYTES", 700 * 1024 * 1024)  # default 700MB
+MAX_VIDEO_BYTES = _env_int("CLIPBUILDER_MAX_VIDEO_BYTES", 700 * 1024 * 1024)  # default 700MB
 MAX_VIDEO_MB = max(1, int(MAX_VIDEO_BYTES / (1024 * 1024)))
 
-logger.info("config: DOCUVIDEO_MAX_VIDEO_BYTES=%s (~%s MB)", MAX_VIDEO_BYTES, MAX_VIDEO_MB)
+logger.info("config: CLIPBUILDER_MAX_VIDEO_BYTES=%s (~%s MB)", MAX_VIDEO_BYTES, MAX_VIDEO_MB)
 
-GEMINI_CLIP_SECONDS = _env_int("DOCUVIDEO_GEMINI_CLIP_SECONDS", 90)
-GEMINI_PROXY_HEIGHT = _env_int("DOCUVIDEO_GEMINI_PROXY_HEIGHT", 720)
+GEMINI_CLIP_SECONDS = _env_int("CLIPBUILDER_GEMINI_CLIP_SECONDS", 90)
+GEMINI_PROXY_HEIGHT = _env_int("CLIPBUILDER_GEMINI_PROXY_HEIGHT", 720)
 
-DEFAULT_GEMINI_MODEL = os.getenv("DOCUVIDEO_GEMINI_MODEL", "models/gemini-2.0-flash")
+DEFAULT_GEMINI_MODEL = os.getenv("CLIPBUILDER_GEMINI_MODEL", "models/gemini-2.5-flash")
 GEMINI_POLL_TIMEOUT_SECONDS = 300
 GEMINI_POLL_INTERVAL_SECONDS = 2
 
-app = FastAPI(title="DocuVideo")
+YTDLP_COOKIES_FILE = (os.getenv("CLIPBUILDER_YTDLP_COOKIES_FILE") or "").strip()
+YTDLP_COOKIES_FROM_BROWSER = (os.getenv("CLIPBUILDER_YTDLP_COOKIES_FROM_BROWSER") or "").strip()
+YTDLP_COOKIES_FROM_BROWSER_ARGS = (os.getenv("CLIPBUILDER_YTDLP_COOKIES_FROM_BROWSER_ARGS") or "").strip()
+
+app = FastAPI(title="ClipBuilder")
 
 app.add_exception_handler(StarletteHTTPException, _http_exception_handler)
 app.add_exception_handler(Exception, _unhandled_exception_handler)
@@ -147,12 +154,30 @@ class VideoEntry:
     error: str | None = None
 
 
-DATA_DIR = Path(os.getenv("DOCUVIDEO_DATA_DIR", Path(__file__).resolve().parent / "data"))
+DATA_DIR = Path(os.getenv("CLIPBUILDER_DATA_DIR", Path(__file__).resolve().parent / "data"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
-logger.info("config: DOCUVIDEO_DATA_DIR=%s", DATA_DIR)
+logger.info("config: CLIPBUILDER_DATA_DIR=%s", DATA_DIR)
 
 _videos_lock = threading.Lock()
 _videos: dict[str, VideoEntry] = {}
+
+
+def _restore_video_entry_if_missing(video_id: str) -> VideoEntry | None:
+    """Restore an in-memory entry from disk after a server reload.
+
+    We intentionally keep _videos in-memory for simplicity, but uvicorn --reload
+    restarts the process, so we reconstruct entries on demand when possible.
+    """
+    candidates = [DATA_DIR / f"video_{video_id}.mp4", DATA_DIR / f"video_{video_id}.mkv"]
+    for path in candidates:
+        try:
+            if path.exists() and path.is_file() and path.stat().st_size > 0:
+                entry = VideoEntry(path=path, status="ready")
+                _videos[video_id] = entry
+                return entry
+        except Exception:
+            continue
+    return None
 
 def _configure_genai(api_key: str) -> None:
     try:
@@ -236,6 +261,115 @@ def _ensure_ffmpeg() -> str:
     return path
 
 
+def _is_supported_youtube_url(url: str) -> bool:
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return False
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    host = (parsed.netloc or "").lower()
+    if host.startswith("www."):
+        host = host[4:]
+    return host in {"youtube.com", "m.youtube.com", "youtu.be"} or host.endswith(".youtube.com")
+
+
+def _ytdlp_cmd() -> list[str]:
+    # Prefer binary if available, otherwise fall back to python module.
+    if shutil.which("yt-dlp"):
+        return ["yt-dlp"]
+    return [sys.executable, "-m", "yt_dlp"]
+
+
+def _ytdlp_cookie_args() -> list[str]:
+    raw = (YTDLP_COOKIES_FILE or "").strip()
+    if not raw:
+        return []
+    try:
+        path = Path(raw).expanduser()
+        if not path.is_absolute():
+            path = (Path(__file__).resolve().parent / path).resolve()
+        if path.exists() and path.is_file():
+            return ["--cookies", str(path)]
+    except Exception:
+        pass
+    return []
+
+
+def _ytdlp_browser_cookie_args() -> list[str]:
+    raw = (YTDLP_COOKIES_FROM_BROWSER or "").strip()
+    if not raw:
+        return []
+    # Allow passing extra selector arguments if needed (e.g. "firefox:default" or keyring selector).
+    if (YTDLP_COOKIES_FROM_BROWSER_ARGS or "").strip():
+        selector = f"{raw}:{YTDLP_COOKIES_FROM_BROWSER_ARGS.strip()}"
+    else:
+        selector = raw
+    return ["--cookies-from-browser", selector]
+
+
+def _ytdlp_auth_args() -> list[str]:
+    # Prefer browser cookies when configured (avoids manual export), fall back to cookies file.
+    args = _ytdlp_browser_cookie_args()
+    if args:
+        return args
+    return _ytdlp_cookie_args()
+
+
+def _download_youtube_video(*, url: str, out_path: Path) -> None:
+    _ensure_ffmpeg()  # yt-dlp may need it to merge streams
+
+    cmd = _ytdlp_cmd() + [
+        "--no-playlist",
+        "--no-warnings",
+        *(_ytdlp_auth_args()),
+        "--max-filesize",
+        f"{MAX_VIDEO_MB}M",
+        "-f",
+        # Prefer MP4; fall back to best.
+        "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+        "--merge-output-format",
+        "mp4",
+        "-o",
+        str(out_path),
+        url,
+    ]
+
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if proc.returncode != 0:
+        stderr = (proc.stderr or "").strip()
+        stdout = (proc.stdout or "").strip()
+        tail = "\n".join((stderr.splitlines() + stdout.splitlines())[-20:]).strip()
+
+        lowered = (tail or "").lower()
+        if "sign in to confirm" in lowered and "not a bot" in lowered:
+            hint = (
+                "O YouTube bloqueou o download e pediu verificação (\"not a bot\"). "
+                "Para vídeos assim, é necessário fornecer cookies do seu navegador para o yt-dlp. "
+                "Opção A: exporte um cookies.txt e configure CLIPBUILDER_YTDLP_COOKIES_FILE. "
+                "Opção B: configure CLIPBUILDER_YTDLP_COOKIES_FROM_BROWSER (ex.: firefox, chrome, chromium) para usar o perfil do navegador."
+            )
+            raise HTTPException(status_code=403, detail=hint)
+
+        raise RuntimeError(f"yt-dlp failed ({proc.returncode}): {tail or 'unknown error'}")
+
+    if not out_path.exists() or out_path.stat().st_size == 0:
+        raise RuntimeError("Download falhou: arquivo de saída não foi criado")
+
+    if out_path.stat().st_size > MAX_VIDEO_BYTES:
+        try:
+            out_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"Vídeo muito grande (limite atual: {MAX_VIDEO_MB} MB). "
+                "Ajuste CLIPBUILDER_MAX_VIDEO_BYTES no backend/.env."
+            ),
+        )
+
+
 def _make_gemini_clip(*, source_path: Path, timestamp_seconds: float, clip_seconds: int, out_path: Path) -> tuple[int, int]:
     ffmpeg: str = _ensure_ffmpeg()
     clip_seconds = max(10, int(clip_seconds))
@@ -317,6 +451,7 @@ def _make_gemini_clip(*, source_path: Path, timestamp_seconds: float, clip_secon
 def _describe_at_timestamp(*, gemini_file_name: str, timestamp: str, clip_seconds: int, api_key: str, model_name: str, user_prompt: str | None = None, include_timestamp: bool = True) -> str:
     _configure_genai(api_key)
     import google.generativeai as genai
+    from google.api_core import exceptions as gexc  # type: ignore
 
     # Accept either "gemini-2.0-flash" or "models/gemini-2.0-flash".
     normalized_model = (model_name or "").strip()
@@ -342,7 +477,37 @@ def _describe_at_timestamp(*, gemini_file_name: str, timestamp: str, clip_second
         prompt = base
 
     model = genai.GenerativeModel(normalized_model or DEFAULT_GEMINI_MODEL)
-    response = model.generate_content([file_ref, prompt])
+
+    def _extract_retry_seconds(message: str) -> float | None:
+        # Example: "Please retry in 13.644857575s."
+        import re
+
+        m = re.search(r"retry in\s+([0-9]+(?:\.[0-9]+)?)s", message, flags=re.IGNORECASE)
+        if not m:
+            return None
+        try:
+            value = float(m.group(1))
+        except ValueError:
+            return None
+        return value if value > 0 else None
+
+    response = None
+    for attempt in range(2):
+        try:
+            response = model.generate_content([file_ref, prompt])
+            break
+        except (getattr(gexc, "ResourceExhausted", Exception), getattr(gexc, "TooManyRequests", Exception)) as exc:
+            if attempt >= 1:
+                raise
+            retry_seconds = _extract_retry_seconds(str(exc) or "")
+            # Cap to keep requests responsive.
+            sleep_for = min(max(retry_seconds or 2.0, 0.5), 15.0)
+            import time
+
+            time.sleep(sleep_for)
+
+    if response is None:
+        return ""
     text = getattr(response, "text", None)
     if not text:
         return ""
@@ -352,6 +517,7 @@ def _describe_at_timestamp(*, gemini_file_name: str, timestamp: str, clip_second
 @dataclass
 class StepPayload:
     description: str
+    has_image: bool = True
 
 
 def _parse_steps(steps_raw: str) -> list[StepPayload]:
@@ -366,13 +532,23 @@ def _parse_steps(steps_raw: str) -> list[StepPayload]:
     steps: list[StepPayload] = []
     for item in payload:
         if isinstance(item, str):
-            steps.append(StepPayload(description=item))
+            steps.append(StepPayload(description=item, has_image=True))
             continue
         if isinstance(item, dict):
             description = item.get("description", "")
             if not isinstance(description, str):
                 raise HTTPException(status_code=400, detail="Each step description must be a string")
-            steps.append(StepPayload(description=description))
+
+            has_image_raw = item.get("has_image", True)
+            has_image = True
+            if isinstance(has_image_raw, bool):
+                has_image = has_image_raw
+            elif has_image_raw is None:
+                has_image = True
+            else:
+                raise HTTPException(status_code=400, detail="Each step has_image must be a boolean")
+
+            steps.append(StepPayload(description=description, has_image=has_image))
             continue
         raise HTTPException(status_code=400, detail="Each step must be a string or an object")
 
@@ -380,6 +556,22 @@ def _parse_steps(steps_raw: str) -> list[StepPayload]:
 
 
 _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+
+
+def _sanitize_image_prefix(prefix: str | None) -> str:
+    raw = (prefix or "").strip()
+    if not raw:
+        return "step_"
+    # If user typed an extension, drop it to avoid "foo.png01.png"
+    if raw.lower().endswith(".png"):
+        raw = raw[: -len(".png")]
+    # Prevent path traversal / nested paths
+    raw = raw.replace("/", "_").replace("\\", "_")
+    raw = "_".join(raw.split())
+    allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+    cleaned = "".join((ch if ch in allowed else "_") for ch in raw)
+    cleaned = cleaned[:60].strip("._")
+    return cleaned or "step_"
 
 
 def _validate_png(image_bytes: bytes) -> None:
@@ -433,7 +625,7 @@ async def upload_video(
                         status_code=413,
                         detail=(
                             f"Vídeo muito grande (limite atual: {MAX_VIDEO_MB} MB). "
-                            "Ajuste DOCUVIDEO_MAX_VIDEO_BYTES no backend/.env."
+                            "Ajuste CLIPBUILDER_MAX_VIDEO_BYTES no backend/.env."
                         ),
                     )
                 f.write(chunk)
@@ -444,7 +636,7 @@ async def upload_video(
                 status_code=507,
                 detail=(
                     "Sem espaço em disco para salvar o vídeo. "
-                    "Ajuste DOCUVIDEO_DATA_DIR para um caminho com espaço suficiente."
+                    "Ajuste CLIPBUILDER_DATA_DIR para um caminho com espaço suficiente."
                 ),
             ) from exc
         logger.error("os error while saving upload to %s", target_path, exc_info=True)
@@ -490,7 +682,7 @@ async def upload_video_raw(
                         status_code=413,
                         detail=(
                             f"Vídeo muito grande (limite atual: {MAX_VIDEO_MB} MB). "
-                            "Ajuste DOCUVIDEO_MAX_VIDEO_BYTES no backend/.env."
+                            "Ajuste CLIPBUILDER_MAX_VIDEO_BYTES no backend/.env."
                         ),
                     )
                 f.write(chunk)
@@ -503,7 +695,7 @@ async def upload_video_raw(
                 status_code=507,
                 detail=(
                     "Sem espaço em disco para salvar o vídeo. "
-                    "Ajuste DOCUVIDEO_DATA_DIR para um caminho com espaço suficiente."
+                    "Ajuste CLIPBUILDER_DATA_DIR para um caminho com espaço suficiente."
                 ),
             ) from exc
         logger.error("os error while saving raw upload to %s", target_path, exc_info=True)
@@ -526,8 +718,88 @@ def video_status(video_id: str):
     with _videos_lock:
         entry = _videos.get(video_id)
         if not entry:
+            entry = _restore_video_entry_if_missing(video_id)
+        if not entry:
             raise HTTPException(status_code=404, detail="Vídeo não encontrado")
         return {"status": entry.status, "error": entry.error}
+
+
+@app.get("/videos/{video_id}/file")
+def video_file(video_id: str):
+    with _videos_lock:
+        entry = _videos.get(video_id)
+        if not entry:
+            entry = _restore_video_entry_if_missing(video_id)
+        if not entry:
+            raise HTTPException(status_code=404, detail="Vídeo não encontrado")
+        if entry.status != "ready":
+            raise HTTPException(status_code=409, detail=entry.error or "Vídeo não está pronto")
+        path = entry.path
+
+    ext = path.suffix.lower()
+    media_type = "video/mp4" if ext == ".mp4" else "video/x-matroska"
+    return FileResponse(
+        path=path,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f'inline; filename="{path.name}"',
+            "Cross-Origin-Resource-Policy": "cross-origin",
+        },
+    )
+
+
+@app.post("/videos/youtube")
+async def upload_youtube(
+    background_tasks: BackgroundTasks,
+    request: Request,
+    x_google_api_key: str | None = Header(default=None, alias="X-Google-Api-Key"),
+):
+    # Expect JSON: {"url": "https://..."}
+    try:
+        payload = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Body inválido. Envie JSON com campo 'url'.") from exc
+
+    url = (payload.get("url") if isinstance(payload, dict) else "")
+    url = (url or "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="Campo 'url' é obrigatório")
+    if not _is_supported_youtube_url(url):
+        raise HTTPException(status_code=400, detail="URL não suportada. Use um link do YouTube (youtube.com / youtu.be).")
+
+    # Validate API key early so the user gets fast feedback.
+    _get_api_key(x_google_api_key)
+
+    video_id = uuid.uuid4().hex
+    target_path = DATA_DIR / f"video_{video_id}.mp4"
+
+    with _videos_lock:
+        _videos[video_id] = VideoEntry(path=target_path, status="processing")
+
+    def job() -> None:
+        try:
+            _download_youtube_video(url=url, out_path=target_path)
+            with _videos_lock:
+                current = _videos.get(video_id)
+                if current:
+                    current.status = "ready"
+                    current.error = None
+        except HTTPException as exc:
+            with _videos_lock:
+                current = _videos.get(video_id)
+                if current:
+                    current.status = "error"
+                    current.error = str(exc.detail)
+        except Exception as exc:
+            with _videos_lock:
+                current = _videos.get(video_id)
+                if current:
+                    current.status = "error"
+                    current.error = str(exc)
+            logger.error("youtube download failed (video_id=%s): %s", video_id, exc, exc_info=True)
+
+    background_tasks.add_task(job)
+    return {"video_id": video_id, "status": "processing"}
 
 
 @app.get("/videos/{video_id}/smart-text")
@@ -542,6 +814,8 @@ async def smart_text(
 ):
     with _videos_lock:
         entry = _videos.get(video_id)
+        if not entry:
+            entry = _restore_video_entry_if_missing(video_id)
         if not entry:
             raise HTTPException(status_code=404, detail="Vídeo não encontrado")
         if entry.status != "ready":
@@ -617,15 +891,54 @@ async def smart_text(
     try:
         text = await anyio.to_thread.run_sync(work)
     except Exception as exc:
+        if isinstance(exc, HTTPException):
+            raise
+
         # Normalize common Gemini errors so the frontend gets a meaningful status.
         try:
+            import re
             from google.api_core import exceptions as gexc  # type: ignore
 
-            if isinstance(exc, getattr(gexc, "ResourceExhausted", ())):
-                raise HTTPException(
-                    status_code=429,
-                    detail="Quota do Gemini excedida (429). Verifique billing/limites na sua conta/projeto.",
-                ) from exc
+            def _retry_hint_from_message(message: str) -> str:
+                # Example: "Please retry in 13.644857575s."
+                m = re.search(r"retry in\s+([0-9]+(?:\.[0-9]+)?)s", message, flags=re.IGNORECASE)
+                if not m:
+                    return ""
+                seconds = m.group(1)
+                return f" Tente novamente em ~{seconds}s."
+
+            def _as_list(e: BaseException) -> list[BaseException]:
+                # AnyIO / Python may raise ExceptionGroup with multiple nested exceptions.
+                eg = getattr(e, "exceptions", None)
+                if isinstance(eg, list):
+                    return eg
+                return [e]
+
+            candidates: list[BaseException] = []
+            for one in _as_list(exc):
+                candidates.append(one)
+                cause = getattr(one, "__cause__", None)
+                if isinstance(cause, BaseException):
+                    candidates.append(cause)
+
+            def _msg(e: BaseException) -> str:
+                try:
+                    return str(e) or e.__class__.__name__
+                except Exception:
+                    return e.__class__.__name__
+
+            for one in candidates:
+                message = _msg(one)
+                if isinstance(one, getattr(gexc, "ResourceExhausted", ())) or (
+                    "quota" in message.lower() or "resourceexhausted" in message.lower() or " 429" in message
+                ):
+                    raise HTTPException(
+                        status_code=429,
+                        detail=(
+                            "Quota/limite do Gemini excedido (429). Verifique billing/limites do projeto e tente novamente."
+                            + _retry_hint_from_message(message)
+                        ),
+                    ) from exc
 
             if isinstance(exc, getattr(gexc, "TooManyRequests", ())):
                 raise HTTPException(
@@ -672,14 +985,26 @@ async def smart_text(
 @app.post("/export")
 async def export_documentation(
     steps: str = Form(...),
-    images: list[UploadFile] = File(...),
+    images: list[UploadFile] = File(default=[]),
+    image_name_prefix: str | None = Form(default=None),
+    output_format: str | None = Form(default="markdown"),
 ):
     parsed_steps = _parse_steps(steps)
 
-    if len(parsed_steps) != len(images):
+    fmt = (output_format or "markdown").strip().lower()
+    if fmt not in {"markdown", "html", "docx", "plain"}:
+        raise HTTPException(status_code=400, detail="Invalid output_format. Use markdown, html, docx, or plain.")
+
+    prefix = _sanitize_image_prefix(image_name_prefix)
+
+    expected_images = sum(1 for s in parsed_steps if s.has_image)
+    if expected_images != len(images):
         raise HTTPException(
             status_code=400,
-            detail=f"Steps count ({len(parsed_steps)}) must match images count ({len(images)})",
+            detail=(
+                f"Images count ({len(images)}) must match steps with images ({expected_images}). "
+                "Send images only for steps where has_image=true."
+            ),
         )
 
     total_bytes = 0
@@ -701,19 +1026,125 @@ async def export_documentation(
         processed_images.append(image_bytes)
 
     md_lines: list[str] = ["# Tutorial\n"]
+
+    step_index_to_image: dict[int, bytes] = {}
+    image_cursor = 0
+    for step_idx, step in enumerate(parsed_steps, start=1):
+        if step.has_image:
+            if image_cursor >= len(processed_images):
+                raise HTTPException(status_code=400, detail="Missing image for one or more steps")
+            step_index_to_image[step_idx] = processed_images[image_cursor]
+            image_cursor += 1
+
     for i, step in enumerate(parsed_steps, start=1):
         md_lines.append(f"## Passo {i}\n")
         description = step.description.strip() or "(sem descrição)"
         md_lines.append(description + "\n")
-        md_lines.append(f"![Passo {i}](./img/step_{i:02d}.png)\n")
+        if step.has_image:
+            md_lines.append(f"![Passo {i}](./img/{prefix}{i:02d}.png)\n")
+
+    if fmt == "plain":
+        lines: list[str] = ["Tutorial", ""]
+        for i, step in enumerate(parsed_steps, start=1):
+            lines.append(f"Passo {i}")
+            lines.append("-" * 7)
+            lines.append((step.description or "").strip() or "(sem descrição)")
+            if step.has_image:
+                lines.append(f"[imagem: {prefix}{i:02d}.png]")
+            lines.append("")
+
+        txt = "\n".join(lines).rstrip() + "\n"
+        buf = io.BytesIO(txt.encode("utf-8"))
+        headers = {"Content-Disposition": 'attachment; filename="tutorial.txt"'}
+        return StreamingResponse(buf, media_type="text/plain; charset=utf-8", headers=headers)
+
+    if fmt == "html":
+        parts: list[str] = []
+        parts.append("<!doctype html>")
+        parts.append('<html lang="pt-br">')
+        parts.append("<head>")
+        parts.append('<meta charset="utf-8"/>')
+        parts.append('<meta name="viewport" content="width=device-width, initial-scale=1"/>')
+        parts.append("<title>Tutorial</title>")
+        parts.append(
+            "<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Arial,sans-serif;max-width:900px;margin:24px auto;padding:0 16px;line-height:1.5}"  # noqa: E501
+            "h1{margin:0 0 16px} h2{margin:24px 0 8px} .step{margin-bottom:18px}"  # noqa: E501
+            "img{max-width:100%;height:auto;border:1px solid #ddd;border-radius:8px} pre{background:#f6f8fa;padding:12px;border-radius:8px;overflow:auto}"  # noqa: E501
+            ".muted{color:#666}</style>"
+        )
+        parts.append("</head>")
+        parts.append("<body>")
+        parts.append("<h1>Tutorial</h1>")
+        for i, step in enumerate(parsed_steps, start=1):
+            parts.append(f"<section class=\"step\">")
+            parts.append(f"<h2>Passo {i}</h2>")
+            desc = (step.description or "").strip() or "(sem descrição)"
+            # Basic HTML escaping
+            esc = (
+                desc.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+            )
+            parts.append(f"<p>{esc}</p>")
+            if step.has_image:
+                img_bytes = step_index_to_image.get(i)
+                if img_bytes:
+                    b64 = base64.b64encode(img_bytes).decode("ascii")
+                    parts.append(f'<img alt="Passo {i}" src="data:image/png;base64,{b64}"/>')
+                else:
+                    parts.append('<div class="muted">(imagem ausente)</div>')
+            parts.append("</section>")
+        parts.append("</body></html>")
+
+        html_bytes = "\n".join(parts).encode("utf-8")
+        buf = io.BytesIO(html_bytes)
+        headers = {"Content-Disposition": 'attachment; filename="tutorial.html"'}
+        return StreamingResponse(buf, media_type="text/html; charset=utf-8", headers=headers)
+
+    if fmt == "docx":
+        try:
+            from docx import Document
+            from docx.shared import Inches
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail="Dependências para DOCX não instaladas. Instale python-docx e Pillow no backend.",
+            ) from exc
+
+        doc = Document()
+        doc.add_heading("Tutorial", level=1)
+        for i, step in enumerate(parsed_steps, start=1):
+            doc.add_heading(f"Passo {i}", level=2)
+            desc = (step.description or "").strip() or "(sem descrição)"
+            doc.add_paragraph(desc)
+            if step.has_image:
+                img_bytes = step_index_to_image.get(i)
+                if img_bytes:
+                    stream = io.BytesIO(img_bytes)
+                    try:
+                        doc.add_picture(stream, width=Inches(6.5))
+                    except Exception:
+                        # Fallback: try without width if some builds choke on sizing
+                        stream.seek(0)
+                        doc.add_picture(stream)
+
+        out = io.BytesIO()
+        doc.save(out)
+        out.seek(0)
+        headers = {"Content-Disposition": 'attachment; filename="tutorial.docx"'}
+        return StreamingResponse(
+            out,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers=headers,
+        )
 
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("tutorial.md", "\n".join(md_lines).strip() + "\n")
-        for i, image_bytes in enumerate(processed_images, start=1):
-            zf.writestr(f"img/step_{i:02d}.png", image_bytes)
+        for step_idx, image_bytes in step_index_to_image.items():
+            zf.writestr(f"img/{prefix}{step_idx:02d}.png", image_bytes)
 
     zip_buffer.seek(0)
 
-    headers = {"Content-Disposition": 'attachment; filename="docuvideo_export.zip"'}
+    headers = {"Content-Disposition": 'attachment; filename="clipbuilder_export.zip"'}
     return StreamingResponse(zip_buffer, media_type="application/zip", headers=headers)

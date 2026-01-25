@@ -1,15 +1,23 @@
 import React from 'react'
 
 export default function StepCard({ s, idx, updateDescription, generateWithAI, removeStep, aiStepBusyId, darkMode, videoId, aiStatus }) {
+  const hasTimestamp = Boolean((s?.timestamp || '').trim())
+
   return (
-    <div className={`rounded-md border p-12 ${darkMode ? 'text-slate-100' : 'bg-slate-50'}`} style={darkMode ? { backgroundColor: '#343434', borderColor: '#555' } : undefined}>
+    <div className={`rounded-md border p-12`} style={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text)' }}>
       <div className="flex flex-col items-start gap-6">
-        <img src={s.url} alt={`Passo ${idx + 1}`} className="w-full h-96 rounded object-cover" />
+        {s?.url ? (
+          <img src={s.url} alt={`Passo ${idx + 1}`} className="w-full h-96 rounded object-cover" />
+        ) : (
+          <div className="w-full h-96 rounded border flex items-center justify-center" style={{ borderColor: 'var(--card-border)', color: 'var(--muted-text)' }}>
+            Passo sem imagem
+          </div>
+        )}
         <div className="min-w-0 flex-1 w-full">
-          <div className="mb-4 text-3xl font-bold">Passo {idx + 1} • {s.timestamp}</div>
+          <div className="mb-4 text-3xl font-bold">Passo {idx + 1}{hasTimestamp ? ` • ${s.timestamp}` : ''}</div>
           <textarea
             className={`w-full resize-none rounded-md border px-6 py-5 text-xl outline-none focus:ring-2 ${darkMode ? 'focus:ring-gray-600 text-slate-100' : 'focus:ring-slate-200'}`}
-            style={darkMode ? { backgroundColor: '#343434', borderColor: '#555' } : undefined}
+            style={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text)' }}
             rows={12}
             placeholder="Descreva o passo..."
             value={s.description}
@@ -20,7 +28,7 @@ export default function StepCard({ s, idx, updateDescription, generateWithAI, re
               className={`rounded-md border px-6 py-4 text-xl font-semibold`}
               onClick={() => generateWithAI(s.id)}
               type="button"
-              disabled={!videoId || aiStatus !== 'ready' || aiStepBusyId === s.id}
+              disabled={!videoId || !hasTimestamp || aiStatus !== 'ready' || aiStepBusyId === s.id}
             >
               {aiStepBusyId === s.id ? 'Gerando...' : 'Gerar com IA'}
             </button>

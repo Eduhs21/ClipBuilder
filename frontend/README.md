@@ -1,4 +1,4 @@
-# DocuVideo Frontend (React + Vite + Tailwind)
+# ClipBuilder Frontend (React + Vite + Tailwind)
 
 ## Pré-requisito
 - Node.js 18+ e npm.

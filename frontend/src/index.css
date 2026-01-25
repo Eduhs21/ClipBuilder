@@ -6,6 +6,32 @@
   color-scheme: light;
 }
 
+:root {
+  --bg: #f8fafc;
+  --panel: #ffffff;
+  --panel-border: #e6e9ee;
+  --card-bg: #ffffff;
+  --card-border: #e6e9ee;
+  --muted-text: #64748b;
+  --text: #0f172a;
+  --accent: #374151;
+  --modal-overlay: rgba(0,0,0,0.5);
+  --spinner: #9ca3af;
+}
+
+html.dark {
+  --bg: #121212;
+  --panel: #222428; /* page panels */
+  --panel-border: #33383d;
+  --card-bg: #2b2b2b;
+  --card-border: #444444;
+  --muted-text: #9ca3af;
+  --text: #e6eef8;
+  --accent: #9ca3af;
+  --modal-overlay: rgba(0,0,0,0.65);
+  --spinner: #d1d5db;
+}
+
 html,
 body {
   height: 100%;
