@@ -8,7 +8,7 @@ ClipBuilder transforma vídeos em tutoriais passo‑a‑passo e exporta em **HTM
 2) O app permite **capturar frames** do vídeo e organizar em uma lista de “passos”.
 3) Para cada passo, você pode:
 	- escrever/editar a descrição manualmente
-	- pedir para a IA (Gemini) gerar a descrição com base no **timestamp**
+	- pedir para a IA (Groq) gerar a descrição com base no **timestamp**
 	- editar a imagem do passo (corte/anotações)
 4) No fim, você exporta o tutorial em:
 	- **Markdown** (inclui opção de ZIP com imagens)
@@ -26,7 +26,7 @@ ClipBuilder transforma vídeos em tutoriais passo‑a‑passo e exporta em **HTM
 
 **Backend**
 - Python + FastAPI (API HTTP)
-- Gemini (SDK `google.generativeai`) para geração de texto
+- Groq API (Llama 4 Vision) para geração de texto e análise de imagens
 - `ffmpeg` para suporte a vídeo
 - `yt-dlp` para importação do YouTube (com suporte a cookies quando necessário)
 
@@ -66,7 +66,7 @@ cd "/caminho/para/Projeto DOC"
 Crie `backend/.env` (esse arquivo é local e fica fora do git):
 
 ```bash
-GOOGLE_API_KEY=SEU_TOKEN_AQUI
+GROQ_API_KEY=SEU_TOKEN_AQUI
 ```
 
 Dica: você pode copiar e editar o exemplo: [backend/.env.example](backend/.env.example)
@@ -161,9 +161,10 @@ Em Fedora/RHEL com SELinux, os mounts usam `:Z` (já configurado no [docker-comp
 
 ### 5) Configurações mais comuns (no backend/.env)
 
-Além de `GOOGLE_API_KEY`, você pode definir no `backend/.env` (opcional):
+Além de `GROQ_API_KEY`, você pode definir no `backend/.env` (opcional):
 
-- `CLIPBUILDER_GEMINI_MODEL` (ex.: `models/gemini-2.5-flash`)
+- `CLIPBUILDER_GROQ_MODEL` (ex.: `llama-3.3-70b-versatile`)
+- `CLIPBUILDER_GROQ_VISION_MODEL` (ex.: `meta-llama/llama-4-maverick-17b-128e-instruct`)
 - `CLIPBUILDER_MAX_VIDEO_BYTES` (padrão 6GB)
 - `CLIPBUILDER_YTDLP_COOKIES_FILE` / `CLIPBUILDER_YTDLP_COOKIES_FROM_BROWSER` (para import do YouTube)
 

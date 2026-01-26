@@ -149,11 +149,11 @@ export default function SettingsModalExtended({ open, onClose, aiContext, setAiC
             <label htmlFor="cfg-incl-ts" className="text-sm">Incluir timestamp nas descrições</label>
           </div>
           <div>
-            <label className="text-sm mr-2">Modelo Gemini</label>
+            <label className="text-sm mr-2">Modelo Groq</label>
             <select value={geminiModel} onChange={(e) => setGeminiModel(e.target.value)} className="rounded border px-2 py-1" style={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text)' }}>
-              <option value="models/gemini-2.0-flash">gemini-2.0-flash</option>
-              <option value="models/gemini-2.5-flash">gemini-2.5-flash</option>
-              <option value="models/gemini-2.5-pro">gemini-2.5-pro</option>
+              <option value="llama-3.3-70b-versatile">Llama 3.3 70B</option>
+              <option value="llama-4-scout-17b-16e-instruct">Llama 4 Scout 17B</option>
+              <option value="meta-llama/llama-4-maverick-17b-128e-instruct">Llama 4 Maverick 17B</option>
             </select>
           </div>
         </div>

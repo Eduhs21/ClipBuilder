@@ -1,14 +1,23 @@
 # ClipBuilder Backend (FastAPI)
 
-## Configuração do Gemini
+## Configuração do Groq
 
-- Crie um arquivo `.env` a partir de `.env.example` e defina `GOOGLE_API_KEY`.
-- Model padrão: `CLIPBUILDER_GEMINI_MODEL=models/gemini-2.5-flash`.
-- Você pode trocar o modelo via `CLIPBUILDER_GEMINI_MODEL` (ex.: `models/gemini-2.5-pro`).
+- Crie um arquivo `.env` a partir de `.env.example` e defina `GROQ_API_KEY`.
+- Models padrão:
+  - Texto: `CLIPBUILDER_GROQ_MODEL=llama-3.3-70b-versatile`
+  - Visão: `CLIPBUILDER_GROQ_VISION_MODEL=meta-llama/llama-4-maverick-17b-128e-instruct`
 
-O backend usa `ffmpeg` para gerar um clipe curto por timestamp (para funcionar bem com vídeos grandes).
+### Modelos de Visão Suportados
 
-Exemplos:
+Para análise de imagens/frames de vídeo, use um destes modelos:
+- `meta-llama/llama-4-maverick-17b-128e-instruct` (recomendado)
+- `meta-llama/llama-4-scout-17b-16e-instruct`
+- `llama-3.2-11b-vision-preview`
+- `llama-3.2-90b-vision-preview`
+
+O backend usa `ffmpeg` para extrair frames de vídeo.
+
+Exemplos de instalação do ffmpeg:
 - Debian/Ubuntu: `sudo apt-get install -y ffmpeg`
 - Fedora: `sudo dnf install -y ffmpeg`
 - Arch: `sudo pacman -S ffmpeg`
@@ -37,12 +46,12 @@ Observações:
 - `markdown` retorna um ZIP com `tutorial.md` + pasta `img/`.
 - `pdf` é gerado via ReportLab (no Docker já inclui fonte DejaVu para acentos/pt-BR).
 
-## Áudio-to-Text
+## AI Vision (Groq)
 
-AI Analysis (Gemini):
+Análise de frames de vídeo com IA:
 - Upload de vídeo: `POST /videos` (multipart: `video`) ou `POST /videos/raw` (raw body)
 	- O backend salva o vídeo localmente.
-	- A cada `smart-text`, ele gera um clipe curto ao redor do timestamp e envia *apenas o clipe* ao Gemini.
+	- A cada `smart-text`, extrai um frame do timestamp e envia ao Groq Vision.
 - Status: `GET /videos/{video_id}/status`
 - Descrição por timestamp: `GET /videos/{video_id}/smart-text?timestamp=00:05:30`
 
