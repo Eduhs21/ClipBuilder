@@ -1,6 +1,21 @@
-import React from 'react'
+import React, { useState } from 'react'
 
-export default function Sidebar({ steps = [], selectedStepId, setSelectedStepId, updateDescription, generateWithAI, removeStep, aiStepBusyId, videoId, aiStatus, darkMode, onEditImage }) {
+export default function Sidebar({
+  steps = [],
+  selectedStepId,
+  setSelectedStepId,
+  reorderSteps,
+  updateDescription,
+  generateWithAI,
+  removeStep,
+  aiStepBusyId,
+  videoId,
+  aiStatus,
+  darkMode,
+  onEditImage
+}) {
+  const [draggingId, setDraggingId] = useState(null)
+
   const selected = steps.find((s) => s.id === selectedStepId) || steps[0] || null
   const canGenerate =
     !!selected &&
@@ -70,7 +85,42 @@ export default function Sidebar({ steps = [], selectedStepId, setSelectedStepId,
       <div className="flex-1 overflow-auto">
         <div className="flex flex-col gap-3">
           {steps.map((s, idx) => (
-            <button key={s.id} onClick={() => setSelectedStepId(s.id)} className={`flex items-start gap-3 rounded-md border p-3 text-left w-full transition-colors`} style={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text)' }}>
+            <button
+              key={s.id}
+              type="button"
+              draggable
+              onClick={() => setSelectedStepId(s.id)}
+              onDragStart={(e) => {
+                setDraggingId(s.id)
+                try {
+                  e.dataTransfer.effectAllowed = 'move'
+                  // Alguns navegadores só disparam drop se algum dado for definido
+                  e.dataTransfer.setData('text/plain', s.id)
+                } catch {
+                  // ignore
+                }
+              }}
+              onDragOver={(e) => {
+                if (!draggingId || draggingId === s.id) return
+                e.preventDefault()
+                try {
+                  e.dataTransfer.dropEffect = 'move'
+                } catch {
+                  // ignore
+                }
+              }}
+              onDrop={(e) => {
+                if (!draggingId || draggingId === s.id) return
+                e.preventDefault()
+                reorderSteps?.(draggingId, s.id)
+                setDraggingId(null)
+              }}
+              onDragEnd={() => setDraggingId(null)}
+              className={`flex items-start gap-3 rounded-md border p-3 text-left w-full transition-colors ${
+                draggingId === s.id ? 'opacity-70 border-dashed' : ''
+              }`}
+              style={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text)' }}
+            >
               {s?.url ? (
                 <img src={s.url} alt={`Passo ${idx + 1}`} className="h-20 w-28 rounded object-cover flex-shrink-0" />
               ) : (

@@ -16,7 +16,6 @@ import uuid
 import zipfile
 from dataclasses import dataclass, field
 from errno import ENOSPC
-from functools import partial
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -122,70 +121,11 @@ logger.info("config: CLIPBUILDER_MAX_VIDEO_BYTES=%s (~%s MB)", MAX_VIDEO_BYTES, 
 GEMINI_CLIP_SECONDS = _env_int("CLIPBUILDER_GEMINI_CLIP_SECONDS", 90)
 GEMINI_PROXY_HEIGHT = _env_int("CLIPBUILDER_GEMINI_PROXY_HEIGHT", 720)
 
-AI_PROVIDER = (os.getenv("CLIPBUILDER_AI_PROVIDER") or "groq").strip().lower() or "groq"
-DEFAULT_GROQ_MODEL = os.getenv("CLIPBUILDER_GROQ_MODEL", "llama-3.3-70b-versatile")
-DEFAULT_GROQ_VISION_MODEL = os.getenv("CLIPBUILDER_GROQ_VISION_MODEL", "meta-llama/llama-4-maverick-17b-128e-instruct")
+DEFAULT_GEMINI_MODEL = os.getenv("CLIPBUILDER_GEMINI_MODEL", "models/gemini-2.5-flash")
+GEMINI_POLL_TIMEOUT_SECONDS = 300
+GEMINI_POLL_INTERVAL_SECONDS = 2
+
 AI_LANGUAGE = (os.getenv("CLIPBUILDER_AI_LANGUAGE") or "pt-BR").strip() or "pt-BR"
-
-# Lista de modelos Groq que suportam visão (imagens)
-# Fonte: https://console.groq.com/docs/models
-GROQ_VISION_MODELS = {
-    # Llama 4 Vision Models
-    "meta-llama/llama-4-maverick-17b-128e-instruct",
-    "meta-llama/llama-4-scout-17b-16e-instruct",
-    # Llama 3.2 Vision Models  
-    "llama-3.2-11b-vision-preview",
-    "llama-3.2-90b-vision-preview",
-}
-
-# System prompt fixo para o agente de documentação
-DOCUMENTATION_AGENT_PROMPT = os.getenv("CLIPBUILDER_AGENT_PROMPT", """
-Você é um especialista em criar documentação técnica e manuais de procedimentos corporativos.
-Sua função é analisar capturas de tela de softwares/sistemas e gerar instruções PRÁTICAS e ACIONÁVEIS de como realizar o processo mostrado.
-
-⚠️ REGRAS CRÍTICAS - SIGA RIGOROSAMENTE:
-
-1. **NÃO DESCREVA A INTERFACE** - Não fale sobre HTML, CSS, cores, layout ou tecnologias da página
-2. **FOQUE NA AÇÃO** - Descreva EXATAMENTE o que o usuário deve FAZER, não o que ele VÊ
-3. **USE VERBOS IMPERATIVOS** - "Clique em...", "Selecione...", "Preencha...", "Acesse..."
-4. **IDENTIFIQUE ELEMENTOS** - Mencione botões, campos e menus pelos NOMES EXATOS visíveis na tela
-5. **FORMATO MARKDOWN** - Use formatação rica com títulos, listas, tabelas e emojis
-
-📋 FORMATO DE SAÍDA OBRIGATÓRIO:
-
-### [Número com emoji] Nome da Etapa
-
-- Instrução direta do que fazer
-- Se houver formulário, liste os campos em TABELA markdown:
-
-| Campo | Valor/Instrução |
-|-------|-----------------|
-| Nome do Campo | O que preencher |
-
-- Inclua observações com 💡 quando relevante
-- Use ⚠️ para avisos importantes
-
-🚫 NUNCA FAÇA:
-- Explicar como a página foi construída (HTML, CSS, JavaScript)
-- Descrever cores, bordas, sombras ou elementos visuais
-- Falar sobre "renderização", "protocolo HTTPS", "grid layout"
-- Fazer análise técnica da interface
-
-✅ SEMPRE FAÇA:
-- Dizer exatamente ONDE clicar
-- Informar O QUE digitar em cada campo
-- Numerar os passos sequencialmente
-- Usar linguagem de manual de procedimentos corporativo
-- Responder em português brasileiro (pt-BR)
-
-EXEMPLO DE RESPOSTA CORRETA:
-### 1️⃣ Download da Tabela de Preços
-
-- Acesse a seção **"Listas de Preços de Medicamentos"**
-- Clique no card **"PMC - xls"** para baixar a planilha Excel com os preços ao consumidor
-
-💡 **Dica:** O arquivo XLS pode ser aberto no Excel ou Google Sheets
-""").strip()
 
 YTDLP_COOKIES_FILE = (os.getenv("CLIPBUILDER_YTDLP_COOKIES_FILE") or "").strip()
 YTDLP_COOKIES_FROM_BROWSER = (os.getenv("CLIPBUILDER_YTDLP_COOKIES_FROM_BROWSER") or "").strip()
@@ -241,38 +181,48 @@ def _restore_video_entry_if_missing(video_id: str) -> VideoEntry | None:
             continue
     return None
 
-def _get_groq_api_key(x_groq_api_key: str | None) -> str:
-    api_key = (os.getenv("GROQ_API_KEY") or "").strip() or (x_groq_api_key or "").strip()
+def _configure_genai(api_key: str) -> None:
+    try:
+        import google.generativeai as genai
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="Dependência 'google-generativeai' não instalada no backend.",
+        ) from exc
+
+    genai.configure(api_key=api_key)
+
+
+def _get_api_key(x_google_api_key: str | None) -> str:
+    api_key = (os.getenv("GOOGLE_API_KEY") or "").strip() or (x_google_api_key or "").strip()
     if not api_key:
         raise HTTPException(
             status_code=400,
-            detail="GROQ_API_KEY não configurada. Defina no backend (.env) ou envie no header X-Groq-Api-Key.",
+            detail="GOOGLE_API_KEY não configurada. Defina no backend (.env) ou envie no header X-Google-Api-Key.",
         )
     return api_key
 
 
-def _extract_frame_image(*, source_path: Path, timestamp_seconds: float, out_path: Path) -> None:
-    ffmpeg: str = _ensure_ffmpeg()
-    ts = max(0, int(timestamp_seconds))
-    cmd = [
-        ffmpeg,
-        "-y",
-        "-ss",
-        str(ts),
-        "-i",
-        str(source_path),
-        "-frames:v",
-        "1",
-        "-q:v",
-        "2",
-        str(out_path),
-    ]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
-    if proc.returncode != 0:
-        tail = "\n".join((proc.stderr or "").splitlines()[-20:]).strip()
-        raise RuntimeError(f"ffmpeg falhou ao extrair frame: {tail or 'erro desconhecido'}")
-    if not out_path.exists() or out_path.stat().st_size == 0:
-        raise RuntimeError("Frame não foi gerado")
+def _upload_video_to_gemini(video_path: Path, api_key: str) -> str:
+    _configure_genai(api_key)
+    import google.generativeai as genai
+
+    uploaded = genai.upload_file(path=str(video_path))
+    file_name = getattr(uploaded, "name", None)
+    if not file_name:
+        raise RuntimeError("Falha ao fazer upload do vídeo para o Gemini")
+
+    deadline = time.time() + GEMINI_POLL_TIMEOUT_SECONDS
+    while time.time() < deadline:
+        current = genai.get_file(file_name)
+        state = getattr(getattr(current, "state", None), "name", None) or str(getattr(current, "state", ""))
+        if state == "ACTIVE":
+            return file_name
+        if state in {"FAILED", "ERROR"}:
+            raise RuntimeError("Gemini falhou ao processar o arquivo de vídeo")
+        time.sleep(GEMINI_POLL_INTERVAL_SECONDS)
+
+    raise RuntimeError("Timeout aguardando o Gemini processar o arquivo (ACTIVE)")
 
 
 def _format_timestamp(seconds: float) -> str:
@@ -653,7 +603,7 @@ def health() -> dict[str, str]:
 @app.post("/videos")
 async def upload_video(
     video: UploadFile = File(...),
-    x_groq_api_key: str | None = Header(default=None, alias="X-Groq-Api-Key"),
+    x_google_api_key: str | None = Header(default=None, alias="X-Google-Api-Key"),
 ):
     filename = (video.filename or "").strip()
     ext = Path(filename).suffix.lower()
@@ -717,7 +667,7 @@ async def upload_video(
         _videos[video_id] = VideoEntry(path=target_path, status="ready")
 
     # Validate API key early so the user gets fast feedback.
-    _get_groq_api_key(x_groq_api_key)
+    _get_api_key(x_google_api_key)
     return {"video_id": video_id, "status": "ready"}
 
 
@@ -725,7 +675,7 @@ async def upload_video(
 async def upload_video_raw(
     request: Request,
     x_filename: str | None = Header(default=None, alias="X-Filename"),
-    x_groq_api_key: str | None = Header(default=None, alias="X-Groq-Api-Key"),
+    x_google_api_key: str | None = Header(default=None, alias="X-Google-Api-Key"),
 ):
     filename = (x_filename or "video.mp4").strip()
     ext = Path(filename).suffix.lower()
@@ -774,7 +724,7 @@ async def upload_video_raw(
         _videos[video_id] = VideoEntry(path=target_path, status="ready")
 
     # Validate API key early so the user gets fast feedback.
-    _get_groq_api_key(x_groq_api_key)
+    _get_api_key(x_google_api_key)
     return {"video_id": video_id, "status": "ready"}
 
 
@@ -817,7 +767,7 @@ def video_file(video_id: str):
 async def upload_youtube(
     background_tasks: BackgroundTasks,
     request: Request,
-    x_groq_api_key: str | None = Header(default=None, alias="X-Groq-Api-Key"),
+    x_google_api_key: str | None = Header(default=None, alias="X-Google-Api-Key"),
 ):
     # Expect JSON: {"url": "https://..."}
     try:
@@ -833,7 +783,7 @@ async def upload_youtube(
         raise HTTPException(status_code=400, detail="URL não suportada. Use um link do YouTube (youtube.com / youtu.be).")
 
     # Validate API key early so the user gets fast feedback.
-    _get_groq_api_key(x_groq_api_key)
+    _get_api_key(x_google_api_key)
 
     video_id = uuid.uuid4().hex
     target_path = DATA_DIR / f"video_{video_id}.mp4"
@@ -872,19 +822,11 @@ async def smart_text(
     video_id: str,
     timestamp: str | None = None,
     t: float | None = None,
-    model: str = DEFAULT_GROQ_VISION_MODEL,
+    model: str = DEFAULT_GEMINI_MODEL,
     prompt: str | None = None,
     include_timestamp: bool = True,
-    x_groq_api_key: str | None = Header(default=None, alias="X-Groq-Api-Key"),
+    x_google_api_key: str | None = Header(default=None, alias="X-Google-Api-Key"),
 ):
-    # Validar se o modelo suporta visão
-    if model not in GROQ_VISION_MODELS:
-        supported = ", ".join(sorted(GROQ_VISION_MODELS))
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Modelo '{model}' não suporta visão (imagens). Use um destes: {supported}"
-        )
-    
     with _videos_lock:
         entry = _videos.get(video_id)
         if not entry:
@@ -895,7 +837,7 @@ async def smart_text(
             raise HTTPException(status_code=409, detail=entry.error or "Vídeo não está pronto")
         source_path = entry.path
 
-    api_key = _get_groq_api_key(x_groq_api_key)
+    api_key = _get_api_key(x_google_api_key)
     if timestamp is None:
         if t is None:
             raise HTTPException(status_code=400, detail="Informe timestamp (HH:MM:SS) ou t (segundos)")
@@ -906,99 +848,153 @@ async def smart_text(
     except ValueError:
         raise HTTPException(status_code=400, detail="timestamp inválido. Use HH:MM:SS")
 
-    # Extract a video frame and call Groq vision
-    frame_path = DATA_DIR / f"frame_{video_id}_{int(ts_seconds)}.png"
-    try:
-        await anyio.to_thread.run_sync(partial(_extract_frame_image, source_path=source_path, timestamp_seconds=ts_seconds, out_path=frame_path))
+    clip_key = f"{int(ts_seconds)}:{int(GEMINI_CLIP_SECONDS)}"
+    with _videos_lock:
+        cached = entry.clip_cache.get(clip_key)
 
-        import base64
-        image_b64 = base64.b64encode(frame_path.read_bytes()).decode("ascii")
-
-        # Default prompt - instruções fortes para gerar manual de procedimentos
-        default_user_prompt = """🚨 INSTRUÇÕES OBRIGATÓRIAS - LEIA COM ATENÇÃO:
-
-Você é um redator de manuais de procedimentos corporativos. Analise esta captura de tela e gere APENAS instruções práticas.
-
-❌ NÃO FAÇA ISSO (exemplo ruim):
-"A imagem mostra uma tela com retângulos brancos contendo links..."
-"A página possui um menu de navegação..."
-"Na parte superior há uma barra de tarefas..."
-
-✅ FAÇA ISSO (exemplo correto):
-### 1️⃣ Download da Tabela PMC
-
-- Acesse o site da **ANVISA** na seção de preços de medicamentos
-- Clique no botão **"PMC - xls"** para baixar a planilha de Preço Máximo ao Consumidor
-
-💡 **Dica:** O arquivo estará no formato Excel (.xls)
-
----
-
-AGORA, analise a imagem e gere instruções no formato acima.
-Responda SOMENTE com o passo a passo do que o usuário deve FAZER.
-Use markdown, emojis (1️⃣ 2️⃣ 3️⃣), negrito para botões/campos, e tabelas se houver formulário."""
-        
-        # Se o usuário passou um prompt customizado, usa ele; senão usa o default
-        if prompt and prompt.strip():
-            # Adiciona contexto ao prompt customizado
-            user_prompt = f"""🚨 GERE INSTRUÇÕES DE MANUAL, NÃO DESCRIÇÃO VISUAL.
-
-Tarefa: {prompt.strip()}
-
-Responda com passos práticos usando markdown, emojis e formato de tutorial."""
-        else:
-            user_prompt = default_user_prompt
-            
-        if include_timestamp:
-            user_prompt = f"[Timestamp {timestamp}]\n\n" + user_prompt
-
+    if not cached:
+        clip_path = DATA_DIR / f"clip_{video_id}_{int(ts_seconds)}_{int(GEMINI_CLIP_SECONDS)}.mp4"
         try:
-            from groq import Groq  # type: ignore
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail="Dependência 'groq' não instalada.") from exc
-
-        client = Groq(api_key=api_key)
-        
-        # Combina system prompt + user prompt em uma única mensagem
-        # (alguns modelos de visão ignoram system messages)
-        full_prompt = f"""{DOCUMENTATION_AGENT_PROMPT}
-
----
-
-{user_prompt}"""
-        
-        try:
-            resp = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": full_prompt},
-                            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}},
-                        ],
-                    }
-                ],
+            _make_gemini_clip(
+                source_path=source_path,
+                timestamp_seconds=ts_seconds,
+                clip_seconds=GEMINI_CLIP_SECONDS,
+                out_path=clip_path,
             )
-        except Exception as exc:
-            msg = str(exc) or "Erro ao chamar Groq"
-            logger.error(f"Groq API error: {msg}")
-            lowered = msg.lower()
-            if "unauthorized" in lowered or "api key" in lowered:
-                raise HTTPException(status_code=403, detail="Chave GROQ_API_KEY inválida.") from exc
-            if "rate limit" in lowered or "429" in lowered:
-                raise HTTPException(status_code=429, detail="Limite/Rate limit da Groq excedido (429).") from exc
-            raise HTTPException(status_code=500, detail=f"Falha ao consultar a Groq: {msg}") from exc
 
-        text = (resp.choices[0].message.content if getattr(resp, "choices", None) else "").strip()
-        if not text:
-            text = "(sem conteúdo gerado)"
-        return {"text": text}
-    finally:
+            def upload_work() -> str:
+                return _upload_video_to_gemini(clip_path, api_key)
+
+            cached = await anyio.to_thread.run_sync(upload_work)
+            with _videos_lock:
+                current = _videos.get(video_id)
+                if current and current.status == "ready":
+                    current.clip_cache[clip_key] = cached
+        except HTTPException:
+            raise
+        except Exception as exc:
+            with _videos_lock:
+                current = _videos.get(video_id)
+                if current:
+                    current.error = str(exc)
+            logger.error(
+                "gemini clip upload failed (video_id=%s, timestamp=%s): %s",
+                video_id,
+                timestamp,
+                exc,
+                exc_info=True,
+            )
+            raise HTTPException(status_code=500, detail="Falha ao preparar/enviar clipe para o Gemini") from exc
+        finally:
+            try:
+                if clip_path.exists():
+                    clip_path.unlink()
+            except Exception:
+                pass
+
+    def work() -> str:
+        return _describe_at_timestamp(
+            gemini_file_name=str(cached),
+            timestamp=str(timestamp),
+            clip_seconds=int(GEMINI_CLIP_SECONDS),
+            api_key=api_key,
+            model_name=model,
+            user_prompt=prompt,
+            include_timestamp=bool(include_timestamp),
+        )
+
+    try:
+        text = await anyio.to_thread.run_sync(work)
+    except Exception as exc:
+        if isinstance(exc, HTTPException):
+            raise
+
+        # Normalize common Gemini errors so the frontend gets a meaningful status.
         try:
-            frame_path.unlink(missing_ok=True)
+            import re
+            from google.api_core import exceptions as gexc  # type: ignore
+
+            def _retry_hint_from_message(message: str) -> str:
+                # Example: "Please retry in 13.644857575s."
+                m = re.search(r"retry in\s+([0-9]+(?:\.[0-9]+)?)s", message, flags=re.IGNORECASE)
+                if not m:
+                    return ""
+                seconds = m.group(1)
+                return f" Tente novamente em ~{seconds}s."
+
+            def _as_list(e: BaseException) -> list[BaseException]:
+                # AnyIO / Python may raise ExceptionGroup with multiple nested exceptions.
+                eg = getattr(e, "exceptions", None)
+                if isinstance(eg, list):
+                    return eg
+                return [e]
+
+            candidates: list[BaseException] = []
+            for one in _as_list(exc):
+                candidates.append(one)
+                cause = getattr(one, "__cause__", None)
+                if isinstance(cause, BaseException):
+                    candidates.append(cause)
+
+            def _msg(e: BaseException) -> str:
+                try:
+                    return str(e) or e.__class__.__name__
+                except Exception:
+                    return e.__class__.__name__
+
+            for one in candidates:
+                message = _msg(one)
+                if isinstance(one, getattr(gexc, "ResourceExhausted", ())) or (
+                    "quota" in message.lower() or "resourceexhausted" in message.lower() or " 429" in message
+                ):
+                    raise HTTPException(
+                        status_code=429,
+                        detail=(
+                            "Quota/limite do Gemini excedido (429). Verifique billing/limites do projeto e tente novamente."
+                            + _retry_hint_from_message(message)
+                        ),
+                    ) from exc
+
+            if isinstance(exc, getattr(gexc, "TooManyRequests", ())):
+                raise HTTPException(
+                    status_code=429,
+                    detail="Muitas requisições ao Gemini (429). Tente novamente em instantes.",
+                ) from exc
+
+            if isinstance(exc, getattr(gexc, "PermissionDenied", ())):
+                raise HTTPException(
+                    status_code=403,
+                    detail="Permissão negada pelo Gemini. Verifique se a API está habilitada e se a chave é válida.",
+                ) from exc
+
+            if isinstance(exc, getattr(gexc, "NotFound", ())):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Modelo do Gemini não encontrado/suportado. Ajuste o model para um valor retornado por list_models().",
+                ) from exc
+
+            if isinstance(exc, getattr(gexc, "InvalidArgument", ())):
+                raise HTTPException(status_code=400, detail="Parâmetros inválidos ao chamar o Gemini.") from exc
         except Exception:
+            # If google-api-core isn't available or anything goes wrong while mapping,
+            # fall back to the generic handler below.
             pass
+
+        with _videos_lock:
+            current = _videos.get(video_id)
+            if current:
+                current.error = str(exc)
+        logger.error(
+            "gemini smart-text failed (video_id=%s, model=%s, timestamp=%s): %s",
+            video_id,
+            model,
+            timestamp,
+            exc,
+            exc_info=True,
+        )
+        raise HTTPException(status_code=500, detail="Falha ao analisar com Gemini") from exc
+
+    return {"text": text}
 
 
 @app.post("/export")

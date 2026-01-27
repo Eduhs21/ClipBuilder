@@ -84,11 +84,9 @@ export default function App() {
   const [youtubeImporting, setYoutubeImporting] = useState(false)
   const [geminiModel, setGeminiModel] = useState(() => {
     const stored = lsGet(LS.geminiModel)
-    const allowed = new Set(['llama-3.3-70b-versatile', 'llama-4-scout-17b-16e-instruct', 'meta-llama/llama-4-maverick-17b-128e-instruct'])
+    const allowed = new Set(['models/gemini-2.0-flash', 'models/gemini-2.5-flash', 'models/gemini-2.5-pro'])
     if (stored && allowed.has(stored)) return stored
-    // Limpa modelo antigo/inválido do localStorage
-    try { localStorage.removeItem(LS.geminiModel) } catch {}
-    return 'llama-3.3-70b-versatile'
+    return 'models/gemini-2.5-flash'
   })
   const [aiStatus, setAiStatus] = useState('idle') // idle|uploading|processing|ready|error
   const [aiError, setAiError] = useState('')
@@ -124,10 +122,11 @@ export default function App() {
   const [aiFillEnabled, setAiFillEnabled] = useState(() => {
     try {
       const v = lsGet(LS.aiFillEnabled)
-      if (v === null || v === undefined || v === '') return true
+      // Primeiro acesso: deixar desativado por padrão
+      if (v === null || v === undefined || v === '') return false
       return v === '1' || v === 'true'
     } catch {
-      return true
+      return false
     }
   })
   const [outputFormat, setOutputFormat] = useState(() => {
@@ -362,22 +361,9 @@ export default function App() {
         return
       }
 
-      // Create PNG blob from canvas with cross-browser fallback
       let blob = null
       try {
-        if (typeof canvas.toBlob === 'function') {
-          blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'))
-        } else {
-          // Fallback via dataURL
-          const dataUrl = canvas.toDataURL('image/png')
-          const parts = dataUrl.split(',')
-          const byteString = atob(parts[1])
-          const mimeString = parts[0].split(':')[1].split(';')[0] || 'image/png'
-          const ab = new ArrayBuffer(byteString.length)
-          const ia = new Uint8Array(ab)
-          for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i)
-          blob = new Blob([ab], { type: mimeString })
-        }
+        blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'))
       } catch {
         setError('Falha ao exportar o frame. (Possível problema de CORS)')
         return
@@ -409,23 +395,10 @@ export default function App() {
       }
 
       const url = URL.createObjectURL(blob)
-      const makeId = () => {
-        try {
-          if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID()
-        } catch {}
-        // Fallback UUID v4
-        const bytes = new Uint8Array(16)
-        for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256)
-        bytes[6] = (bytes[6] & 0x0f) | 0x40 // version 4
-        bytes[8] = (bytes[8] & 0x3f) | 0x80 // variant RFC 4122
-        const hex = [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('')
-        return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`
-      }
-
       setSteps((prev) => [
         ...prev,
         {
-          id: makeId(),
+          id: crypto.randomUUID(),
           blob,
           url,
           description,
@@ -442,18 +415,7 @@ export default function App() {
   function createTextStep() {
     setError('')
     setAiError('')
-    const makeId = () => {
-      try {
-        if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID()
-      } catch {}
-      const bytes = new Uint8Array(16)
-      for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256)
-      bytes[6] = (bytes[6] & 0x0f) | 0x40
-      bytes[8] = (bytes[8] & 0x3f) | 0x80
-      const hex = [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('')
-      return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`
-    }
-    const id = makeId()
+    const id = crypto.randomUUID()
     setSteps((prev) => [
       ...prev,
       {
@@ -535,6 +497,12 @@ export default function App() {
         return
       }
 
+      const rawPrefix = (imageNamePrefix || '').toString().trim()
+      if (!rawPrefix) {
+        setError('Preencha o prefixo do nome dos arquivos de imagem nas Configurações antes de exportar.')
+        return
+      }
+
       const parseFilenameFromContentDisposition = (value) => {
         const cd = (value || '').toString()
         // RFC 5987 / RFC 6266
@@ -564,7 +532,7 @@ export default function App() {
         return v || 'step_'
       }
 
-      const prefix = sanitizePrefix(imageNamePrefix)
+      const prefix = sanitizePrefix(rawPrefix)
 
       setBusy(true)
       try {
@@ -622,6 +590,21 @@ export default function App() {
       } finally {
         setBusy(false)
       }
+    }
+
+    function reorderSteps(fromId, toId) {
+      if (!fromId || !toId || fromId === toId) return
+      setSteps((prev) => {
+        const fromIndex = prev.findIndex((s) => s.id === fromId)
+        const toIndex = prev.findIndex((s) => s.id === toId)
+        if (fromIndex === -1 || toIndex === -1 || fromIndex === toIndex) {
+          return prev
+        }
+        const next = [...prev]
+        const [moved] = next.splice(fromIndex, 1)
+        next.splice(toIndex, 0, moved)
+        return next
+      })
     }
 
     // Handlers to pass to Sidebar
@@ -714,6 +697,7 @@ export default function App() {
             steps={steps}
             selectedStepId={selectedStepId}
             setSelectedStepId={handleSelectStep}
+            reorderSteps={reorderSteps}
             updateDescription={updateDescription}
             generateWithAI={generateWithAI}
             removeStep={removeStep}

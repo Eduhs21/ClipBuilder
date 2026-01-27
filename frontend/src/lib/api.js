@@ -2,7 +2,7 @@ import axios from 'axios'
 
 const LS = {
   apiUrl: 'CLIPBUILDER_API_URL',
-  groqApiKey: 'CLIPBUILDER_GROQ_API_KEY'
+  googleApiKey: 'CLIPBUILDER_GOOGLE_API_KEY'
 }
 
 // Determine default baseURL from Vite env, localStorage, or fallback
@@ -50,22 +50,22 @@ export function getApiUrl() {
 export function setGoogleApiKey(key) {
   const k = (key || '').toString().trim()
   if (k) {
-    api.defaults.headers['X-Groq-Api-Key'] = k
+    api.defaults.headers['X-Google-Api-Key'] = k
     try {
-      localStorage.setItem(LS.groqApiKey, k)
+      localStorage.setItem(LS.googleApiKey, k)
     } catch {}
   } else {
-    if (api.defaults.headers) delete api.defaults.headers['X-Groq-Api-Key']
+    if (api.defaults.headers) delete api.defaults.headers['X-Google-Api-Key']
     try {
-      localStorage.removeItem(LS.groqApiKey)
+      localStorage.removeItem(LS.googleApiKey)
     } catch {}
   }
 }
 
 // Initialize from localStorage if present
 try {
-  const storedKey = localStorage.getItem(LS.groqApiKey) || ''
-  if (storedKey) api.defaults.headers['X-Groq-Api-Key'] = storedKey
+  const storedKey = localStorage.getItem(LS.googleApiKey) || ''
+  if (storedKey) api.defaults.headers['X-Google-Api-Key'] = storedKey
 } catch (e) {
   // ignore (SSR or restricted env)
 }
@@ -73,11 +73,11 @@ try {
 // Expose helper to clear stored credentials
 export function clearStoredConfig() {
   try {
-    localStorage.removeItem(LS.groqApiKey)
+    localStorage.removeItem(LS.googleApiKey)
   } catch {}
   try {
     localStorage.removeItem(LS.apiUrl)
   } catch {}
-  if (api.defaults.headers) delete api.defaults.headers['X-Groq-Api-Key']
+  if (api.defaults.headers) delete api.defaults.headers['X-Google-Api-Key']
   delete api.defaults.baseURL
 }
