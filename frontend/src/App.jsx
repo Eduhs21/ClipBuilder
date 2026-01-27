@@ -6,6 +6,7 @@ import StepCard from './components/StepCard'
 import Sidebar from './components/Sidebar'
 import SettingsModal from './components/SettingsModalExtended'
 import ImageEditorModal from './components/ImageEditorModal'
+import { Play, FileVideo, Wand2, Settings, Download } from 'lucide-react'
 
 const LS = {
   geminiModel: 'CLIPBUILDER_GEMINI_MODEL',
@@ -622,12 +623,12 @@ export default function App() {
     const editingStep = steps.find((s) => s.id === editingStepId) || null
 
     return (
-      <div className={`min-h-screen ${darkMode ? 'text-slate-100' : 'bg-slate-50 text-slate-900'}`} style={{ backgroundColor: 'var(--bg)', color: 'var(--text)' }}>
+      <div className="min-h-screen" style={{ backgroundColor: 'var(--bg)', color: 'var(--text)' }}>
         <Header darkMode={darkMode} setDarkMode={setDarkMode} stepsCount={steps.length} exportDoc={exportDoc} busy={busy} />
 
-        <main className="mx-auto grid max-w-6xl grid-cols-1 gap-4 px-4 py-4 lg:grid-cols-[1fr_360px]">
-          <section className={`rounded-lg border p-6 cb-panel`} style={{ backgroundColor: 'var(--panel)', borderColor: 'var(--panel-border)' }}>
-            <div className="flex flex-col items-center gap-6">
+        <main className="mx-auto grid max-w-7xl grid-cols-1 gap-6 px-6 py-6 lg:grid-cols-[1fr_400px]">
+          <section className="cb-panel">
+            <div className="flex flex-col items-center gap-8">
               <VideoArea
                 videoUrl={videoUrl}
                 videoRef={videoRef}
@@ -639,52 +640,72 @@ export default function App() {
                 youtubeImporting={youtubeImporting}
                 capturing={capturing}
                 aiStatus={aiStatus}
-                darkMode={darkMode}
               />
 
               <div className="w-full max-w-[960px]">
                 {steps.length === 0 ? (
-                  <div className={`text-sm ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>Capture frames para montar o tutorial.</div>
+                  <div className="text-center py-4">
+                    <div className="text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Capture frames para montar o tutorial</div>
+                    <div className="text-xs" style={{ color: 'var(--muted-text)' }}>Use a tecla <kbd className="px-1.5 py-0.5 rounded text-xs font-mono border" style={{ borderColor: 'var(--card-border)', backgroundColor: 'var(--card-bg)' }}>S</kbd> para capturar rapidamente</div>
+                  </div>
                 ) : (
-                  <div className={`text-sm ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>Selecione um passo à direita para editar</div>
+                  <div className="text-center py-4">
+                    <div className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>Selecione um passo à direita para editar</div>
+                  </div>
                 )}
               </div>
-              <div className="w-full max-w-[960px] mt-6">
-                <div className="flex flex-col gap-3">
+              <div className="w-full max-w-[960px]">
+                <div className="space-y-3">
                   <button
                     onClick={captureFrame}
                     disabled={!videoUrl || capturing}
-                    className="w-full rounded-md border px-6 py-4 text-lg font-semibold"
+                    className="cb-btn cb-btn-primary w-full h-12 text-base font-semibold"
                   >
+                    <Play className="h-5 w-5" />
                     {capturing ? 'Capturando...' : 'Capturar Novo Passo'}
                   </button>
-                  <button
-                    onClick={createTextStep}
-                    className="w-full rounded-md border px-6 py-4 text-lg font-semibold"
-                  >
-                    Novo passo (somente texto)
-                  </button>
-                  <button
-                    onClick={() => setSettingsOpen(true)}
-                    className="w-full rounded-md border px-6 py-4 text-lg font-semibold"
-                  >
-                    ⚙️ Configurações
-                  </button>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      onClick={createTextStep}
+                      className="cb-btn w-full h-11"
+                    >
+                      <FileVideo className="h-4 w-4" />
+                      Passo texto
+                    </button>
+                    <button
+                      onClick={() => setSettingsOpen(true)}
+                      className="cb-btn w-full h-11"
+                    >
+                      <Settings className="h-4 w-4" />
+                      Configurações
+                    </button>
+                  </div>
                   <button
                     onClick={exportDoc}
                     disabled={busy || steps.length === 0}
-                    className="w-full rounded-md border px-6 py-4 text-lg font-semibold"
+                    className="cb-btn w-full h-11 font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    {busy ? 'Exportando...' : 'Exportar'}
+                    <Download className="h-4 w-4" />
+                    {busy ? 'Exportando...' : 'Exportar Tutorial'}
                   </button>
 
                   {(error || aiError) ? (
-                    <div className="rounded-md border px-4 py-3 text-sm" style={{ borderColor: 'var(--card-border)', backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
+                    <div className="rounded-lg border p-4 text-sm" style={{ borderColor: error ? 'var(--danger)' : 'var(--warning)', backgroundColor: error ? 'var(--danger-bg)' : 'var(--warning-bg)', color: error ? 'var(--danger)' : 'var(--warning)' }}>
                       {error ? (
-                        <div className="mb-2" style={{ color: '#ef4444' }}>{error}</div>
+                        <div className="flex items-start gap-2">
+                          <svg className="h-4 w-4 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                          </svg>
+                          <span>{error}</span>
+                        </div>
                       ) : null}
                       {aiError ? (
-                        <div style={{ color: '#f59e0b' }}>{aiError}</div>
+                        <div className="flex items-start gap-2">
+                          <svg className="h-4 w-4 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                          </svg>
+                          <span>{aiError}</span>
+                        </div>
                       ) : null}
                     </div>
                   ) : null}

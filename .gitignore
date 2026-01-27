@@ -22,3 +22,36 @@ env/
 backend/data/
 backend/logs/
 *.log
+
+# IDE/Editor folders
+.agent/
+.agents/
+.claude/
+.cline/
+.codebuddy/
+.codex/
+.commandcode/
+.continue/
+.crush/
+.cursor/
+.factory/
+.gemini/
+.goose/
+.kilocode/
+.kiro/
+.mcpjam/
+.mux/
+.neovate/
+.opencode/
+.openhands/
+.pi/
+.qoder/
+.qwen/
+.roo/
+.trae/
+.windsurf/
+.zencoder/
+.cursorrules
+
+# Skills (se não quiser versionar)
+# skills/

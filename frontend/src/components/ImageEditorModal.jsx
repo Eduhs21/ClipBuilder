@@ -1042,14 +1042,20 @@ export default function ImageEditorModal({ open, onClose, step, onSave }) {
   if (!open || !step) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: 'var(--modal-overlay)' }}>
-      <div className="w-[96vw] max-w-7xl h-[92vh] overflow-hidden rounded p-4 flex flex-col" style={{ backgroundColor: 'var(--panel)', border: '1px solid var(--panel-border)', color: 'var(--text)' }}>
-        <div className="flex items-center justify-between mb-3 shrink-0">
-          <div className="text-lg font-semibold">Editar imagem</div>
-          <button onClick={onClose} className="text-sm">Fechar</button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: 'var(--modal-overlay)' }}>
+      <div className="w-full max-w-7xl h-[92vh] overflow-hidden cb-modal flex flex-col">
+        <div className="cb-modal-header shrink-0">
+          <div className="flex items-center justify-between">
+            <h2 className="cb-modal-title">Editar imagem</h2>
+            <button onClick={onClose} className="cb-btn p-2" aria-label="Fechar">
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
         </div>
         <div className="flex-1 min-h-0 flex flex-col">
-          <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border p-2" style={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--card-border)' }}>
+          <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border p-3" style={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--card-border)' }}>
             <ToolButton active={tool === 'select'} onClick={() => setTool('select')} icon={Icons.select} label="Selecionar" />
             <ToolButton active={tool === 'crop'} onClick={() => { handleCancelCrop(); setTool('crop') }} icon={Icons.crop} label="Recortar" />
             <ToolButton active={tool === 'arrow'} onClick={() => setTool('arrow')} icon={Icons.arrow} label="Seta" />
@@ -1078,21 +1084,22 @@ export default function ImageEditorModal({ open, onClose, step, onSave }) {
 
           <section className="flex-1 min-h-0 flex flex-col">
             {showAdvanced ? (
-              <div className="mb-3 flex flex-wrap items-center gap-3 rounded-md border px-3 py-2" style={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--card-border)' }}>
+              <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border p-3" style={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--card-border)' }}>
                 <div className="flex items-center gap-2">
-                  <label className="text-xs" style={{ color: 'var(--muted-text)' }}>Cor</label>
-                  <input type="color" value={strokeColor} onChange={(e) => setStrokeColor(e.target.value)} />
+                  <label className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>Cor</label>
+                  <input type="color" value={strokeColor} onChange={(e) => setStrokeColor(e.target.value)} className="h-8 w-12 rounded border cursor-pointer" style={{ borderColor: 'var(--card-border)' }} />
                 </div>
 
                 <div className="flex items-center gap-2 min-w-[180px]">
-                  <label className="text-xs" style={{ color: 'var(--muted-text)' }}>Esp.</label>
+                  <label className="text-xs font-medium whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>Espessura</label>
                   <input
                     type="range"
                     min={2}
                     max={24}
                     value={strokeWidth}
                     onChange={(e) => setStrokeWidth(clamp(Number(e.target.value) || 6, 2, 24))}
-                    className="w-full"
+                    className="flex-1"
+                    style={{ accentColor: 'var(--accent)' }}
                   />
                 </div>
 
@@ -1104,13 +1111,13 @@ export default function ImageEditorModal({ open, onClose, step, onSave }) {
             ) : null}
 
             {imageLoadError ? (
-              <div className="rounded-md border p-4 text-sm" style={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text)' }}>
+              <div className="rounded-lg border p-4 text-sm" style={{ backgroundColor: 'var(--danger-bg)', borderColor: 'var(--danger)', color: 'var(--danger)' }}>
                 {imageLoadError}
               </div>
             ) : (
               <div
                 ref={annotateStageRef}
-                className="relative rounded-md border p-2 flex-1 min-h-0 overflow-hidden"
+                className="relative rounded-lg border p-3 flex-1 min-h-0 overflow-hidden"
                 style={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--card-border)', touchAction: 'none' }}
                 onPointerDown={handleStagePointerDown}
                 onPointerMove={handleStagePointerMove}

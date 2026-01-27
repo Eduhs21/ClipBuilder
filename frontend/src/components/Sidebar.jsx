@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { Sparkles, Loader2, Wand2 } from 'lucide-react'
 
 export default function Sidebar({
   steps = [],
@@ -28,115 +29,172 @@ export default function Sidebar({
   const hasSelectedImage = !!selected?.url
 
   return (
-    <aside className={`rounded-lg border p-4 flex flex-col cb-panel`} style={{ backgroundColor: 'var(--panel)', borderColor: 'var(--panel-border)', color: 'var(--text)' }}>
+    <aside className="cb-panel flex flex-col">
       {selected ? (
-        <div className="mb-4">
-          {hasSelectedImage ? (
-            <img src={selected.url} alt="selected" className="w-full h-64 rounded object-cover mb-4" />
-          ) : (
-            <div className="w-full h-64 rounded mb-4 flex items-center justify-center border" style={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--muted-text)' }}>
-              Passo sem imagem
+        <div className="mb-6">
+          <div className="mb-4 rounded-xl overflow-hidden border" style={{ borderColor: 'var(--card-border)' }}>
+            {hasSelectedImage ? (
+              <img src={selected.url} alt="selected" className="w-full h-64 object-cover" />
+            ) : (
+              <div className="w-full h-64 flex items-center justify-center" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--muted-text)' }}>
+                <div className="text-center space-y-2">
+                  <div className="text-sm font-medium">Passo sem imagem</div>
+                  <div className="text-xs">Adicione uma imagem ao capturar</div>
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <div>
+              <div className="text-xl font-serif font-semibold mb-1" style={{ color: 'var(--text)' }}>
+                Passo {steps.indexOf(selected) + 1}
+              </div>
+              {selected.timestamp && (
+                <div className="text-xs font-medium" style={{ color: 'var(--muted-text)' }}>
+                  {selected.timestamp}
+                </div>
+              )}
             </div>
-          )}
-          <div className="mb-2 flex items-center justify-between gap-3">
-            <div className="text-2xl font-semibold">Passo {steps.indexOf(selected) + 1} • {selected.timestamp}</div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-shrink-0">
               <button
                 type="button"
                 onClick={() => onEditImage?.(selected.id)}
                 disabled={!hasSelectedImage}
-                className="cb-btn"
+                className="cb-btn text-xs"
+                title={hasSelectedImage ? 'Editar imagem deste passo' : 'Adicione uma imagem primeiro'}
               >
-                Editar imagem
+                Editar
               </button>
               <button
                 type="button"
                 onClick={() => generateWithAI(selected.id)}
                 disabled={!canGenerate}
-                className="cb-btn cb-btn-primary"
+                className="cb-btn cb-btn-primary flex items-center gap-1.5 text-xs"
+                title={canGenerate ? 'Gerar descrição com IA' : 'Aguarde a IA estar pronta'}
               >
-                {aiStepBusyId === selected.id ? 'Gerando...' : 'Gerar por IA'}
+                {aiStepBusyId === selected.id ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    <span>Gerando...</span>
+                  </>
+                ) : (
+                  <>
+                    <Wand2 className="h-3.5 w-3.5" />
+                    <span>IA</span>
+                  </>
+                )}
               </button>
             </div>
           </div>
           <textarea
-            className="w-full resize-none rounded-md border px-5 py-4 text-lg outline-none focus:ring-2"
+            className="cb-textarea"
             rows={8}
-            placeholder="Descreva o passo..."
+            placeholder="Descreva o passo... (ou use o botão IA para gerar automaticamente)"
             value={selected.description}
             onChange={(e) => updateDescription(selected.id, e.target.value)}
-            style={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text)' }}
           />
 
-          <div className="mt-3 flex items-center justify-end">
+          <div className="mt-4 flex items-center justify-end">
             <button
               type="button"
               onClick={() => removeStep(selected.id)}
-              className="cb-btn cb-btn-danger"
+              className="cb-btn cb-btn-danger text-xs"
             >
               Remover passo
             </button>
           </div>
         </div>
       ) : (
-        <div className="mb-4 text-sm text-slate-400">Nenhum passo selecionado</div>
+        <div className="mb-6 text-center py-8">
+          <div className="text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Nenhum passo selecionado</div>
+          <div className="text-xs" style={{ color: 'var(--muted-text)' }}>Selecione um passo da lista abaixo</div>
+        </div>
       )}
 
-      <div className="flex-1 overflow-auto">
-        <div className="flex flex-col gap-3">
-          {steps.map((s, idx) => (
-            <button
-              key={s.id}
-              type="button"
-              draggable
-              onClick={() => setSelectedStepId(s.id)}
-              onDragStart={(e) => {
-                setDraggingId(s.id)
-                try {
-                  e.dataTransfer.effectAllowed = 'move'
-                  // Alguns navegadores só disparam drop se algum dado for definido
-                  e.dataTransfer.setData('text/plain', s.id)
-                } catch {
-                  // ignore
-                }
-              }}
-              onDragOver={(e) => {
-                if (!draggingId || draggingId === s.id) return
-                e.preventDefault()
-                try {
-                  e.dataTransfer.dropEffect = 'move'
-                } catch {
-                  // ignore
-                }
-              }}
-              onDrop={(e) => {
-                if (!draggingId || draggingId === s.id) return
-                e.preventDefault()
-                reorderSteps?.(draggingId, s.id)
-                setDraggingId(null)
-              }}
-              onDragEnd={() => setDraggingId(null)}
-              className={`flex items-start gap-3 rounded-md border p-3 text-left w-full transition-colors ${
-                draggingId === s.id ? 'opacity-70 border-dashed' : ''
-              }`}
-              style={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text)' }}
-            >
-              {s?.url ? (
-                <img src={s.url} alt={`Passo ${idx + 1}`} className="h-20 w-28 rounded object-cover flex-shrink-0" />
-              ) : (
-                <div className="h-20 w-28 rounded flex-shrink-0 border grid place-items-center text-xs" style={{ backgroundColor: 'rgba(0,0,0,0.10)', borderColor: 'var(--card-border)', color: 'var(--muted-text)' }}>
-                  Texto
-                </div>
-              )}
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between">
-                  <div className="text-sm font-semibold">Passo {idx + 1}</div>
-                  <div className="text-xs text-slate-400">{s.timestamp}</div>
-                </div>
-                <div className="mt-2 text-xs text-slate-400 truncate">{s.description || '—'}</div>
-              </div>
-            </button>
-          ))}
+      <div className="flex-1 overflow-auto -mx-1 px-1">
+        <div className="space-y-2">
+          {steps.length === 0 ? (
+            <div className="text-center py-8">
+              <div className="text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Nenhum passo criado</div>
+              <div className="text-xs" style={{ color: 'var(--muted-text)' }}>Capture frames para começar</div>
+            </div>
+          ) : (
+            steps.map((s, idx) => {
+              const isGenerating = aiStepBusyId === s.id
+              const isSelected = selectedStepId === s.id
+              return (
+                <button
+                  key={s.id}
+                  type="button"
+                  draggable
+                  onClick={() => setSelectedStepId(s.id)}
+                  onDragStart={(e) => {
+                    setDraggingId(s.id)
+                    try {
+                      e.dataTransfer.effectAllowed = 'move'
+                      e.dataTransfer.setData('text/plain', s.id)
+                    } catch {
+                      // ignore
+                    }
+                  }}
+                  onDragOver={(e) => {
+                    if (!draggingId || draggingId === s.id) return
+                    e.preventDefault()
+                    try {
+                      e.dataTransfer.dropEffect = 'move'
+                    } catch {
+                      // ignore
+                    }
+                  }}
+                  onDrop={(e) => {
+                    if (!draggingId || draggingId === s.id) return
+                    e.preventDefault()
+                    reorderSteps?.(draggingId, s.id)
+                    setDraggingId(null)
+                  }}
+                  onDragEnd={() => setDraggingId(null)}
+                  className={`group flex items-start gap-3 rounded-lg border p-3 text-left w-full transition-all ${
+                    draggingId === s.id ? 'opacity-50 border-dashed' : ''
+                  } ${isSelected ? 'ring-2' : ''} ${isGenerating ? 'animate-pulse' : ''}`}
+                  style={{
+                    backgroundColor: isSelected ? 'var(--accent-light)' : 'var(--card-bg)',
+                    borderColor: isSelected ? 'var(--accent)' : 'var(--card-border)',
+                    color: 'var(--text)',
+                    ringColor: 'var(--accent)',
+                  }}
+                >
+                  {s?.url ? (
+                    <img src={s.url} alt={`Passo ${idx + 1}`} className="h-16 w-24 rounded-md object-cover flex-shrink-0 border" style={{ borderColor: 'var(--card-border)' }} />
+                  ) : (
+                    <div className="h-16 w-24 rounded-md flex-shrink-0 border grid place-items-center text-xs font-medium" style={{ backgroundColor: 'var(--btn-hover-bg)', borderColor: 'var(--card-border)', color: 'var(--muted-text)' }}>
+                      Texto
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center gap-2">
+                        <div className="text-sm font-semibold" style={{ color: isSelected ? 'var(--accent)' : 'var(--text)' }}>
+                          Passo {idx + 1}
+                        </div>
+                        {isGenerating && (
+                          <div className="flex items-center gap-1">
+                            <Sparkles className="h-3 w-3 animate-pulse" style={{ color: 'var(--accent)' }} />
+                            <Loader2 className="h-3 w-3 animate-spin" style={{ color: 'var(--accent)' }} />
+                          </div>
+                        )}
+                      </div>
+                      {s.timestamp && (
+                        <div className="text-xs font-medium" style={{ color: 'var(--muted-text)' }}>{s.timestamp}</div>
+                      )}
+                    </div>
+                    <div className="text-xs leading-relaxed line-clamp-2" style={{ color: s.description ? 'var(--text-secondary)' : 'var(--muted-text)' }}>
+                      {s.description || 'Sem descrição'}
+                    </div>
+                  </div>
+                </button>
+              )
+            })
+          )}
         </div>
       </div>
     </aside>

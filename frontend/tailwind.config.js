@@ -2,7 +2,12 @@
 export default {
   content: ['./index.html', './src/**/*.{js,jsx}'],
   theme: {
-    extend: {}
+    extend: {
+      fontFamily: {
+        sans: ['Instrument Sans', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'sans-serif'],
+        serif: ['Instrument Serif', 'Georgia', 'Cambria', 'Times New Roman', 'serif'],
+      },
+    }
   },
   plugins: []
 }

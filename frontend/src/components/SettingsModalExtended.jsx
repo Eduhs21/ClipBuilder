@@ -65,22 +65,29 @@ export default function SettingsModalExtended({ open, onClose, aiContext, setAiC
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: 'var(--modal-overlay)' }}>
-      <div className="w-11/12 max-w-2xl rounded p-6" style={{ backgroundColor: 'var(--panel)', border: '1px solid var(--panel-border)', color: 'var(--text)' }}>
-        <div className="flex items-center justify-between mb-4">
-          <div className="text-lg font-semibold">Configurações da IA</div>
-          <button onClick={onClose} className="text-sm">Fechar</button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: 'var(--modal-overlay)' }}>
+      <div className="cb-modal w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+        <div className="cb-modal-header">
+          <div className="flex items-center justify-between">
+            <h2 className="cb-modal-title text-xl font-semibold text-slate-900">Configurações da IA</h2>
+            <button onClick={onClose} className="cb-btn p-2" aria-label="Fechar">
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div className="cb-modal-body">
+
+        <div>
+          <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text)' }}>Prompt padrão</label>
+          <textarea value={localPrompt} onChange={(e) => setLocalPrompt(e.target.value)} className="cb-textarea" rows={4} />
         </div>
 
-        <div className="mb-4">
-          <label className="block text-sm mb-2">Prompt padrão</label>
-          <textarea value={localPrompt} onChange={(e) => setLocalPrompt(e.target.value)} className="w-full rounded border px-2 py-1" rows={4} style={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text)' }} />
-        </div>
-
-        <div className="mb-4">
-          <label className="block text-sm mb-2">Exemplos rápidos</label>
+        <div>
+          <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text)' }}>Exemplos rápidos</label>
           <div className="flex items-center gap-2">
-            <select value={examplePreset} onChange={(e) => setExamplePreset(e.target.value)} className="rounded border px-2 py-1" style={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text)' }}>
+            <select value={examplePreset} onChange={(e) => setExamplePreset(e.target.value)} className="cb-select flex-1">
               <option value="none">— Nenhum —</option>
               <option value="short_markdown">Resumo curto (Markdown)</option>
               <option value="detailed_steps">Passos detalhados</option>
@@ -90,9 +97,9 @@ export default function SettingsModalExtended({ open, onClose, aiContext, setAiC
               if (examplePreset === 'short_markdown') setLocalPrompt('Escreva um resumo curto em Markdown com título e 3 bullets.')
               else if (examplePreset === 'detailed_steps') setLocalPrompt('Descreva passo a passo detalhado deste frame, incluindo ações e dicas práticas.')
               else if (examplePreset === 'audience_beginner') setLocalPrompt('Explique este passo como se fosse para um iniciante, evitando jargões.')
-            }} className="rounded border px-3 py-1 text-sm">Aplicar exemplo</button>
+            }} className="cb-btn">Aplicar exemplo</button>
           </div>
-          <div className="text-xs mt-1" style={{ color: 'var(--muted-text)' }}>Use exemplos rápidos para ajustar o tom do prompt.</div>
+          <div className="text-xs mt-1.5" style={{ color: 'var(--muted-text)' }}>Use exemplos rápidos para ajustar o tom do prompt.</div>
         </div>
 
         <div className="mb-4 flex items-center justify-between">
@@ -112,45 +119,44 @@ export default function SettingsModalExtended({ open, onClose, aiContext, setAiC
           </label>
         </div>
 
-        <div className="mb-4">
-          <label className="block text-sm mb-2">Nome dos arquivos de imagem (prefixo)</label>
+        <div>
+          <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text)' }}>Nome dos arquivos de imagem (prefixo)</label>
           <input
             value={localImagePrefix}
             onChange={(e) => setLocalImagePrefix(e.target.value)}
-            className="w-full rounded border px-2 py-1"
+            className={`cb-input ${!isImagePrefixValid ? 'border-[var(--danger)]' : ''}`}
             placeholder="step_"
-            style={{ backgroundColor: 'var(--card-bg)', borderColor: isImagePrefixValid ? 'var(--card-border)' : '#ef4444', color: 'var(--text)' }}
           />
           {!isImagePrefixValid ? (
-            <div className="text-xs mt-1" style={{ color: '#ef4444' }}>
+            <div className="text-xs mt-1.5 font-medium" style={{ color: 'var(--danger)' }}>
               Esse campo é obrigatório.
             </div>
           ) : null}
-          <div className="text-xs mt-1" style={{ color: 'var(--muted-text)' }}>
+          <div className="text-xs mt-1.5 leading-relaxed" style={{ color: 'var(--muted-text)' }}>
             Ex.: <span className="font-mono">passo_</span> → <span className="font-mono">passo_01.png</span>, <span className="font-mono">passo_02.png</span>… (vale para o ZIP exportado)
           </div>
         </div>
 
-        <div className="mb-4">
-          <label className="block text-sm mb-2">Formato de saída</label>
-          <select value={localFormat} onChange={(e) => setLocalFormat(e.target.value)} className="rounded border px-2 py-1" style={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text)' }}>
+        <div>
+          <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text)' }}>Formato de saída</label>
+          <select value={localFormat} onChange={(e) => setLocalFormat(e.target.value)} className="cb-select">
             <option value="markdown">Markdown</option>
             <option value="docx">Word (DOCX)</option>
             <option value="html">HTML</option>
             <option value="pdf">PDF</option>
             <option value="plain">Texto simples</option>
           </select>
-          <div className="text-xs mt-1" style={{ color: 'var(--muted-text)' }}>Escolha o formato no qual o conteúdo exportado/gerado deverá ser produzido.</div>
+          <div className="text-xs mt-1.5 leading-relaxed" style={{ color: 'var(--muted-text)' }}>Escolha o formato no qual o conteúdo exportado/gerado deverá ser produzido.</div>
         </div>
 
-        <div className="mb-4 flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-4 rounded-lg border" style={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--card-border)' }}>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input id="cfg-incl-ts" type="checkbox" checked={includeTimestamp} onChange={(e) => setIncludeTimestamp(e.target.checked)} className="h-4 w-4 rounded border" style={{ borderColor: 'var(--card-border)', accentColor: 'var(--accent)' }} />
+            <span className="text-sm font-medium" style={{ color: 'var(--text)' }}>Incluir timestamp nas descrições</span>
+          </label>
           <div className="flex items-center gap-2">
-            <input id="cfg-incl-ts" type="checkbox" checked={includeTimestamp} onChange={(e) => setIncludeTimestamp(e.target.checked)} />
-            <label htmlFor="cfg-incl-ts" className="text-sm">Incluir timestamp nas descrições</label>
-          </div>
-          <div>
-            <label className="text-sm mr-2">Modelo Gemini</label>
-            <select value={geminiModel} onChange={(e) => setGeminiModel(e.target.value)} className="rounded border px-2 py-1" style={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text)' }}>
+            <label className="text-sm font-medium whitespace-nowrap" style={{ color: 'var(--text)' }}>Modelo Gemini</label>
+            <select value={geminiModel} onChange={(e) => setGeminiModel(e.target.value)} className="cb-select">
               <option value="models/gemini-2.0-flash">gemini-2.0-flash</option>
               <option value="models/gemini-2.5-flash">gemini-2.5-flash</option>
               <option value="models/gemini-2.5-pro">gemini-2.5-pro</option>
@@ -158,12 +164,17 @@ export default function SettingsModalExtended({ open, onClose, aiContext, setAiC
           </div>
         </div>
 
-        <div className="flex items-center justify-end gap-3">
+        <div className="cb-modal-footer">
+          <button
+            onClick={onClose}
+            className="cb-btn"
+          >
+            Cancelar
+          </button>
           <button
             onClick={saveAndClose}
             disabled={!isImagePrefixValid}
-            className={`rounded-md px-4 py-2 transition-all ${hasUnsavedChanges ? 'ring-2 ring-emerald-400 ring-offset-2 ring-offset-transparent shadow-md' : 'opacity-70 hover:opacity-90'}`}
-            style={{ backgroundColor: hasUnsavedChanges ? 'var(--accent)' : 'var(--card-bg)', color: hasUnsavedChanges ? '#fff' : 'var(--text)', border: hasUnsavedChanges ? 'none' : '1px solid var(--card-border)' }}
+            className={`cb-btn ${hasUnsavedChanges ? 'cb-btn-primary' : ''}`}
             aria-label={hasUnsavedChanges ? 'Salvar alterações' : 'Salvar (sem alterações)'}
             title={hasUnsavedChanges ? 'Há alterações para salvar' : 'Nenhuma alteração pendente'}
           >
@@ -171,6 +182,7 @@ export default function SettingsModalExtended({ open, onClose, aiContext, setAiC
           </button>
         </div>
       </div>
+    </div>
     </div>
   )
 }
