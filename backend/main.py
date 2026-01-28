@@ -127,6 +127,12 @@ GEMINI_POLL_INTERVAL_SECONDS = 2
 
 AI_LANGUAGE = (os.getenv("CLIPBUILDER_AI_LANGUAGE") or "pt-BR").strip() or "pt-BR"
 
+# Groq API configuration (Llama 4 Vision + Whisper Turbo)
+GROQ_API_KEY = (os.getenv("GROQ_API_KEY") or "").strip()
+DEFAULT_GROQ_VISION_MODEL = os.getenv("CLIPBUILDER_GROQ_VISION_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
+DEFAULT_GROQ_WHISPER_MODEL = os.getenv("CLIPBUILDER_GROQ_WHISPER_MODEL", "whisper-large-v3-turbo")
+GROQ_FRAME_COUNT = _env_int("CLIPBUILDER_GROQ_FRAME_COUNT", 5)  # Max 5 images per Groq request
+
 YTDLP_COOKIES_FILE = (os.getenv("CLIPBUILDER_YTDLP_COOKIES_FILE") or "").strip()
 YTDLP_COOKIES_FROM_BROWSER = (os.getenv("CLIPBUILDER_YTDLP_COOKIES_FROM_BROWSER") or "").strip()
 YTDLP_COOKIES_FROM_BROWSER_ARGS = (os.getenv("CLIPBUILDER_YTDLP_COOKIES_FROM_BROWSER_ARGS") or "").strip()
@@ -160,8 +166,50 @@ DATA_DIR = Path(os.getenv("CLIPBUILDER_DATA_DIR", Path(__file__).resolve().paren
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 logger.info("config: CLIPBUILDER_DATA_DIR=%s", DATA_DIR)
 
+# Maximum number of video files to keep in DATA_DIR (oldest files are removed when exceeded)
+MAX_DATA_FILES = _env_int("CLIPBUILDER_MAX_DATA_FILES", 5)
+logger.info("config: CLIPBUILDER_MAX_DATA_FILES=%s", MAX_DATA_FILES)
+
 _videos_lock = threading.Lock()
 _videos: dict[str, VideoEntry] = {}
+
+
+def _cleanup_old_files() -> None:
+    """Remove oldest video files from DATA_DIR if count exceeds MAX_DATA_FILES.
+    
+    Files are sorted by modification time and the oldest ones are deleted
+    until only MAX_DATA_FILES remain.
+    """
+    try:
+        # Get all video files in DATA_DIR
+        video_files = [
+            f for f in DATA_DIR.iterdir()
+            if f.is_file() and f.name.startswith("video_") and f.suffix.lower() in {".mp4", ".mkv"}
+        ]
+        
+        if len(video_files) <= MAX_DATA_FILES:
+            return
+        
+        # Sort by modification time (oldest first)
+        video_files.sort(key=lambda f: f.stat().st_mtime)
+        
+        # Remove oldest files until we're at the limit
+        files_to_remove = len(video_files) - MAX_DATA_FILES
+        for i in range(files_to_remove):
+            file_to_delete = video_files[i]
+            try:
+                # Also remove from in-memory cache
+                video_id = file_to_delete.stem.replace("video_", "")
+                with _videos_lock:
+                    if video_id in _videos:
+                        del _videos[video_id]
+                
+                file_to_delete.unlink()
+                logger.info("cleanup: removed old video file %s", file_to_delete.name)
+            except Exception as exc:
+                logger.warning("cleanup: failed to remove %s: %s", file_to_delete.name, exc)
+    except Exception as exc:
+        logger.warning("cleanup: failed to clean old files: %s", exc)
 
 
 def _restore_video_entry_if_missing(video_id: str) -> VideoEntry | None:
@@ -461,30 +509,48 @@ def _describe_at_timestamp(*, gemini_file_name: str, timestamp: str, clip_second
         normalized_model = f"models/{normalized_model}"
 
     file_ref = genai.get_file(gemini_file_name)
-    language_instruction = (
-        f"Responda sempre em português do Brasil (pt-BR). "
-        f"Idioma preferido: {AI_LANGUAGE}. "
-        "Mesmo que o pedido esteja em outro idioma, responda em português."
+
+    # 1. Instrução de Sistema / Persona
+    system_instruction = (
+        f"Você é um especialista em Documentação Técnica de Software. "
+        f"Seu objetivo é criar tutoriais passo a passo claros e diretos. "
+        f"Responda sempre em português do Brasil (pt-BR). Idioma preferido: {AI_LANGUAGE}."
     )
 
-    output_style_instruction = (
-        "Escreva apenas o processo (passo a passo), com foco no procedimento e nos comandos/menus/opções relevantes. "
-        "Não faça narração; não descreva o que está na tela; não descreva movimentos do mouse/cursor; "
-        "não mencione 'vídeo', 'clipe', 'cena', 'tela' ou 'o usuário'. "
-        "Evite detalhes supérfluos como posições específicas (ex.: 'célula A1', coordenadas, "
-        "'o cursor posiciona...'), a menos que seja indispensável para executar o procedimento. "
-        "Seja conciso: preferir 3 a 10 passos curtos. Use verbos no imperativo."
+    # 2. Definição de Contexto Temporal (análise expandida)
+    time_instruction = (
+        f"O foco principal é o timestamp: {timestamp}. "
+        f"No entanto, para entender o contexto, ANALISE o vídeo desde 40 segundos ANTES até 40 segundos DEPOIS desse momento. "
+        "Use esse intervalo para identificar qual processo lógico está sendo iniciado ou concluído. "
+        "Entenda o fluxo: Onde o usuário clicou antes para chegar aqui? O que acontece depois que confirma a ação? "
+        "Identifique o OBJETIVO FINAL da ação (ex: não é apenas 'preencher campo', é 'Configurar filtro de data')."
+    )
+
+    # 3. Regras de Formatação e Estilo
+    formatting_instruction = (
+        "REGRAS DE SAÍDA:\n"
+        "1. Identifique a ação macro (ex: 'Cadastrando um novo usuário').\n"
+        "2. Gere APENAS os passos imperativos necessários para realizar essa ação.\n"
+        "3. Ignore movimentos de mouse erráticos ou tentativas falhas.\n"
+        "4. Não use narração (ex: 'O usuário clica...'). Use imperativo (ex: 'Clique em Salvar').\n"
+        "5. Seja conciso (3 a 10 passos).\n"
+        "6. Evite detalhes técnicos visuais (coordenadas X/Y, posições específicas como 'célula A1') a menos que cruciais.\n"
+        "7. Não mencione 'vídeo', 'clipe', 'cena', 'tela', 'o usuário' ou 'o mouse'.\n"
+        "8. Foque nos comandos, menus e opções relevantes para reproduzir o processo."
     )
 
     base_parts: list[str] = [
-        language_instruction,
-        output_style_instruction,
+        system_instruction,
+        time_instruction,
+        formatting_instruction,
     ]
+
     if include_timestamp:
-        base_parts.append(f"Descreva o procedimento que está sendo executado especificamente no momento {timestamp}.")
+        base_parts.append(f"O procedimento ocorre especificamente ao redor de {timestamp}.")
     else:
         base_parts.append("Descreva o procedimento exibido. Não inclua timestamp na resposta.")
-    base = " ".join(base_parts)
+
+    base = "\n\n".join(base_parts)
 
     if user_prompt and str(user_prompt).strip():
         prompt = base + "\n\n" + "Contexto extra do usuário (se aplicável):\n" + str(user_prompt).strip()
@@ -527,6 +593,330 @@ def _describe_at_timestamp(*, gemini_file_name: str, timestamp: str, clip_second
     if not text:
         return ""
     return str(text).strip()
+
+
+# ---------------------------------------------------------------------------
+# Groq API Integration (Llama 4 Vision + Whisper Turbo)
+# ---------------------------------------------------------------------------
+
+def _get_groq_api_key(header_key: str | None = None) -> str:
+    """Get Groq API key from environment or header."""
+    api_key = GROQ_API_KEY or (header_key or "").strip()
+    if not api_key:
+        raise HTTPException(
+            status_code=400,
+            detail="GROQ_API_KEY não configurada. Defina no backend (.env) ou envie no header X-Groq-Api-Key.",
+        )
+    return api_key
+
+
+def _extract_frames_from_video(
+    video_path: Path,
+    timestamp_seconds: float,
+    window_seconds: int = 40,
+    frame_count: int = 5,
+) -> list[bytes]:
+    """Extract frames from video around the timestamp.
+    
+    Extracts `frame_count` frames evenly distributed in a window of
+    `window_seconds` before and after the timestamp.
+    Returns list of PNG image bytes.
+    """
+    ffprobe_cmd = [
+        "ffprobe",
+        "-v", "error",
+        "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1",
+        str(video_path),
+    ]
+    try:
+        result = subprocess.run(ffprobe_cmd, capture_output=True, text=True, check=True)
+        video_duration = float(result.stdout.strip())
+    except Exception:
+        video_duration = timestamp_seconds + window_seconds + 10
+
+    # Calculate frame timestamps
+    start_time = max(0, timestamp_seconds - window_seconds)
+    end_time = min(video_duration, timestamp_seconds + window_seconds)
+    actual_window = end_time - start_time
+    
+    if frame_count <= 1:
+        timestamps = [timestamp_seconds]
+    else:
+        step = actual_window / (frame_count - 1)
+        timestamps = [start_time + i * step for i in range(frame_count)]
+    
+    frames: list[bytes] = []
+    for ts in timestamps:
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            tmp_path = tmp.name
+        
+        try:
+            ffmpeg_cmd = [
+                "ffmpeg",
+                "-y",
+                "-ss", str(ts),
+                "-i", str(video_path),
+                "-vframes", "1",
+                "-vf", f"scale=-1:{GEMINI_PROXY_HEIGHT}",  # Reuse existing height config
+                "-f", "image2",
+                tmp_path,
+            ]
+            subprocess.run(ffmpeg_cmd, capture_output=True, check=True)
+            
+            with open(tmp_path, "rb") as f:
+                frame_data = f.read()
+                if frame_data:
+                    frames.append(frame_data)
+        except Exception as exc:
+            logger.warning("Failed to extract frame at %.2fs: %s", ts, exc)
+        finally:
+            try:
+                Path(tmp_path).unlink(missing_ok=True)
+            except Exception:
+                pass
+    
+    return frames
+
+
+def _extract_audio_clip(
+    video_path: Path,
+    timestamp_seconds: float,
+    window_seconds: int = 40,
+) -> Path | None:
+    """Extract audio clip from video around the timestamp.
+    
+    Returns path to temporary WAV file, or None if extraction fails.
+    """
+    # Get video duration
+    ffprobe_cmd = [
+        "ffprobe",
+        "-v", "error",
+        "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1",
+        str(video_path),
+    ]
+    try:
+        result = subprocess.run(ffprobe_cmd, capture_output=True, text=True, check=True)
+        video_duration = float(result.stdout.strip())
+    except Exception:
+        video_duration = timestamp_seconds + window_seconds + 10
+    
+    start_time = max(0, timestamp_seconds - window_seconds)
+    end_time = min(video_duration, timestamp_seconds + window_seconds)
+    duration = end_time - start_time
+    
+    # Create temp file for audio
+    audio_path = Path(tempfile.mktemp(suffix=".wav"))
+    
+    ffmpeg_cmd = [
+        "ffmpeg",
+        "-y",
+        "-ss", str(start_time),
+        "-i", str(video_path),
+        "-t", str(duration),
+        "-vn",  # No video
+        "-acodec", "pcm_s16le",
+        "-ar", "16000",  # 16kHz for Whisper
+        "-ac", "1",  # Mono
+        str(audio_path),
+    ]
+    
+    try:
+        subprocess.run(ffmpeg_cmd, capture_output=True, check=True)
+        if audio_path.exists() and audio_path.stat().st_size > 1000:
+            return audio_path
+    except Exception as exc:
+        logger.warning("Failed to extract audio: %s", exc)
+    
+    try:
+        audio_path.unlink(missing_ok=True)
+    except Exception:
+        pass
+    return None
+
+
+def _transcribe_with_groq(audio_path: Path, api_key: str) -> str:
+    """Transcribe audio using Groq Whisper API."""
+    try:
+        from groq import Groq
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="Dependência 'groq' não instalada. Execute: pip install groq",
+        ) from exc
+    
+    client = Groq(api_key=api_key)
+    
+    try:
+        with open(audio_path, "rb") as audio_file:
+            transcription = client.audio.transcriptions.create(
+                file=(audio_path.name, audio_file.read()),
+                model=DEFAULT_GROQ_WHISPER_MODEL,
+                language="pt",  # Portuguese
+            )
+        return transcription.text or ""
+    except Exception as exc:
+        logger.warning("Groq transcription failed: %s", exc)
+        return ""
+
+
+def _analyze_frames_with_groq(
+    frames: list[bytes],
+    prompt: str,
+    api_key: str,
+    model: str | None = None,
+) -> str:
+    """Analyze frames using Groq Vision API (Llama 4)."""
+    try:
+        from groq import Groq
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="Dependência 'groq' não instalada. Execute: pip install groq",
+        ) from exc
+    
+    if not frames:
+        raise HTTPException(status_code=400, detail="Nenhum frame extraído do vídeo")
+    
+    client = Groq(api_key=api_key)
+    vision_model = model or DEFAULT_GROQ_VISION_MODEL
+    
+    # Build message content with images
+    content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+    
+    for i, frame_bytes in enumerate(frames[:5]):  # Max 5 images per Groq request
+        b64_image = base64.b64encode(frame_bytes).decode("ascii")
+        content.append({
+            "type": "image_url",
+            "image_url": {
+                "url": f"data:image/png;base64,{b64_image}",
+            },
+        })
+    
+    try:
+        response = client.chat.completions.create(
+            model=vision_model,
+            messages=[{"role": "user", "content": content}],
+            temperature=0.7,
+            max_completion_tokens=2048,
+        )
+        return response.choices[0].message.content or ""
+    except Exception as exc:
+        error_msg = str(exc).lower()
+        if "rate" in error_msg or "limit" in error_msg or "429" in error_msg:
+            raise HTTPException(
+                status_code=429,
+                detail="Limite de requisições do Groq excedido. Tente novamente em alguns segundos.",
+            ) from exc
+        if "invalid" in error_msg and "api" in error_msg:
+            raise HTTPException(
+                status_code=401,
+                detail="Chave da API Groq inválida. Verifique GROQ_API_KEY no .env",
+            ) from exc
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao analisar com Groq: {str(exc)[:200]}",
+        ) from exc
+
+
+def _describe_with_groq(
+    *,
+    video_path: Path,
+    timestamp: str,
+    timestamp_seconds: float,
+    api_key: str,
+    model_name: str | None = None,
+    user_prompt: str | None = None,
+    include_timestamp: bool = True,
+) -> str:
+    """Describe video content using Groq Vision + Whisper.
+    
+    Extracts frames and audio from the video, transcribes audio,
+    and uses vision model to generate description combining both contexts.
+    """
+    # 1. Extract frames
+    frames = _extract_frames_from_video(
+        video_path=video_path,
+        timestamp_seconds=timestamp_seconds,
+        window_seconds=40,
+        frame_count=GROQ_FRAME_COUNT,
+    )
+    
+    if not frames:
+        raise HTTPException(status_code=500, detail="Não foi possível extrair frames do vídeo")
+    
+    # 2. Extract and transcribe audio (in parallel would be better, but keeping simple)
+    audio_context = ""
+    audio_path = _extract_audio_clip(video_path, timestamp_seconds, window_seconds=40)
+    if audio_path:
+        try:
+            audio_context = _transcribe_with_groq(audio_path, api_key)
+        finally:
+            try:
+                audio_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+    
+    # 3. Build prompt (same style as Gemini for consistency)
+    system_instruction = (
+        f"Você é um especialista em Documentação Técnica de Software. "
+        f"Seu objetivo é criar tutoriais passo a passo claros e diretos. "
+        f"Responda sempre em português do Brasil (pt-BR). Idioma preferido: {AI_LANGUAGE}."
+    )
+    
+    time_instruction = (
+        f"O foco principal é o timestamp: {timestamp}. "
+        f"Você está vendo {len(frames)} frames extraídos do vídeo ao redor desse momento. "
+        "Analise a sequência de imagens para entender o fluxo: O que está sendo feito? Qual o objetivo final?"
+    )
+    
+    formatting_instruction = (
+        "REGRAS DE SAÍDA:\n"
+        "1. Identifique a ação macro (ex: 'Cadastrando um novo usuário').\n"
+        "2. Gere APENAS os passos imperativos necessários para realizar essa ação.\n"
+        "3. Ignore movimentos de mouse erráticos ou tentativas falhas.\n"
+        "4. Não use narração (ex: 'O usuário clica...'). Use imperativo (ex: 'Clique em Salvar').\n"
+        "5. Seja conciso (3 a 10 passos).\n"
+        "6. Evite detalhes técnicos visuais (coordenadas X/Y, posições específicas).\n"
+        "7. Não mencione 'vídeo', 'clipe', 'cena', 'tela', 'o usuário' ou 'o mouse'.\n"
+        "8. Foque nos comandos, menus e opções relevantes para reproduzir o processo."
+    )
+    
+    base_parts = [system_instruction, time_instruction, formatting_instruction]
+    
+    if audio_context:
+        base_parts.append(
+            f"CONTEXTO DE ÁUDIO (transcrição do que está sendo dito no vídeo):\n{audio_context}"
+        )
+    
+    if include_timestamp:
+        base_parts.append(f"O procedimento ocorre especificamente ao redor de {timestamp}.")
+    else:
+        base_parts.append("Descreva o procedimento exibido. Não inclua timestamp na resposta.")
+    
+    prompt = "\n\n".join(base_parts)
+    
+    if user_prompt and str(user_prompt).strip():
+        prompt += "\n\n" + "Contexto extra do usuário (se aplicável):\n" + str(user_prompt).strip()
+    
+    # 4. Call vision API
+    return _analyze_frames_with_groq(frames, prompt, api_key, model_name)
+
+
+def _is_groq_model(model_name: str) -> bool:
+    """Check if the model name refers to a Groq model."""
+    if not model_name:
+        return False
+    lower = model_name.lower()
+    return (
+        "llama-4" in lower
+        or "llama4" in lower
+        or lower.startswith("groq/")
+        or lower.startswith("meta-llama/llama-4")
+        or "scout" in lower
+        or "maverick" in lower
+    )
 
 
 @dataclass
@@ -666,6 +1056,9 @@ async def upload_video(
     with _videos_lock:
         _videos[video_id] = VideoEntry(path=target_path, status="ready")
 
+    # Cleanup old files to stay within MAX_DATA_FILES limit
+    _cleanup_old_files()
+
     # Validate API key early so the user gets fast feedback.
     _get_api_key(x_google_api_key)
     return {"video_id": video_id, "status": "ready"}
@@ -722,6 +1115,9 @@ async def upload_video_raw(
     # For very large videos, we keep the original locally and only send a short clip to Gemini on demand.
     with _videos_lock:
         _videos[video_id] = VideoEntry(path=target_path, status="ready")
+
+    # Cleanup old files to stay within MAX_DATA_FILES limit
+    _cleanup_old_files()
 
     # Validate API key early so the user gets fast feedback.
     _get_api_key(x_google_api_key)
@@ -799,6 +1195,8 @@ async def upload_youtube(
                 if current:
                     current.status = "ready"
                     current.error = None
+            # Cleanup old files to stay within MAX_DATA_FILES limit
+            _cleanup_old_files()
         except HTTPException as exc:
             with _videos_lock:
                 current = _videos.get(video_id)
@@ -826,6 +1224,7 @@ async def smart_text(
     prompt: str | None = None,
     include_timestamp: bool = True,
     x_google_api_key: str | None = Header(default=None, alias="X-Google-Api-Key"),
+    x_groq_api_key: str | None = Header(default=None, alias="X-Groq-Api-Key"),
 ):
     with _videos_lock:
         entry = _videos.get(video_id)
@@ -848,6 +1247,40 @@ async def smart_text(
     except ValueError:
         raise HTTPException(status_code=400, detail="timestamp inválido. Use HH:MM:SS")
 
+    # Route to Groq if model is Llama 4 / Scout / Maverick
+    if _is_groq_model(model):
+        groq_key = _get_groq_api_key(x_groq_api_key)
+        
+        def groq_work() -> str:
+            return _describe_with_groq(
+                video_path=source_path,
+                timestamp=str(timestamp),
+                timestamp_seconds=ts_seconds,
+                api_key=groq_key,
+                model_name=model,
+                user_prompt=prompt,
+                include_timestamp=bool(include_timestamp),
+            )
+        
+        try:
+            text = await anyio.to_thread.run_sync(groq_work)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.error(
+                "groq smart-text failed (video_id=%s, model=%s, timestamp=%s): %s",
+                video_id,
+                model,
+                timestamp,
+                exc,
+                exc_info=True,
+            )
+            raise HTTPException(status_code=500, detail=f"Falha ao analisar com Groq: {str(exc)[:200]}") from exc
+        
+        return {"text": text}
+
+    # Default: Use Gemini
+    api_key = _get_api_key(x_google_api_key)
     clip_key = f"{int(ts_seconds)}:{int(GEMINI_CLIP_SECONDS)}"
     with _videos_lock:
         cached = entry.clip_cache.get(clip_key)

@@ -8,7 +8,7 @@ ClipBuilder transforma vídeos em tutoriais passo‑a‑passo e exporta em **HTM
 2) O app permite **capturar frames** do vídeo e organizar em uma lista de “passos”.
 3) Para cada passo, você pode:
 	- escrever/editar a descrição manualmente
-	- pedir para a IA (Gemini) gerar a descrição com base no **timestamp**
+	- pedir para a IA (**Gemini** ou **Groq/Llama 4**) gerar a descrição com base no **timestamp**
 	- editar a imagem do passo (corte/anotações)
 4) No fim, você exporta o tutorial em:
 	- **Markdown** (inclui opção de ZIP com imagens)
@@ -16,6 +16,7 @@ ClipBuilder transforma vídeos em tutoriais passo‑a‑passo e exporta em **HTM
 	- **DOCX (Word)**
 	- **PDF**
 	- **Texto simples**
+5) Você também pode **importar** documentação existente (arquivo `.md` ou `.zip` com imagens)
 
 ## O que foi usado (stack)
 
@@ -27,6 +28,8 @@ ClipBuilder transforma vídeos em tutoriais passo‑a‑passo e exporta em **HTM
 **Backend**
 - Python + FastAPI (API HTTP)
 - Gemini (SDK `google.generativeai`) para geração de texto
+- Groq (SDK `groq`) com Llama 4 Vision e Whisper Turbo para análise alternativa
+- Autenticação JWT via Clerk (opcional)
 - `ffmpeg` para suporte a vídeo
 - `yt-dlp` para importação do YouTube (com suporte a cookies quando necessário)
 
@@ -166,6 +169,9 @@ Além de `GOOGLE_API_KEY`, você pode definir no `backend/.env` (opcional):
 - `CLIPBUILDER_GEMINI_MODEL` (ex.: `models/gemini-2.5-flash`)
 - `CLIPBUILDER_MAX_VIDEO_BYTES` (padrão 6GB)
 - `CLIPBUILDER_YTDLP_COOKIES_FILE` / `CLIPBUILDER_YTDLP_COOKIES_FROM_BROWSER` (para import do YouTube)
+- `GROQ_API_KEY` (chave da API Groq para usar Llama 4 Vision e Whisper Turbo)
+- `ALLOWED_ORIGINS` (lista de origens permitidas para CORS, separadas por vírgula)
+- `CLERK_ISSUER` (URL do emissor Clerk para autenticação JWT, ex.: `https://seu-site.clerk.accounts.dev`)
 
 O Compose já exporta defaults e usa o `backend/.env` via `env_file`.
 
