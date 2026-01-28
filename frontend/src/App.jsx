@@ -6,7 +6,8 @@ import StepCard from './components/StepCard'
 import Sidebar from './components/Sidebar'
 import SettingsModal from './components/SettingsModalExtended'
 import ImageEditorModal from './components/ImageEditorModal'
-import { Play, FileVideo, Wand2, Settings, Download } from 'lucide-react'
+import ProjectsModal from './components/ProjectsModal'
+import { Play, FileVideo, Wand2, Settings, Download, FolderOpen } from 'lucide-react'
 
 const LS = {
   geminiModel: 'CLIPBUILDER_GEMINI_MODEL',
@@ -29,13 +30,13 @@ function lsGet(key) {
 function lsSet(key, value) {
   try {
     localStorage.setItem(key, value)
-  } catch {}
+  } catch { }
 }
 
 function lsRemove(key) {
   try {
     localStorage.removeItem(key)
-  } catch {}
+  } catch { }
 }
 
 function formatBytes(bytes) {
@@ -62,7 +63,7 @@ function downloadBlob(blob, filename) {
   setTimeout(() => {
     try {
       URL.revokeObjectURL(url)
-    } catch {}
+    } catch { }
   }, 1500)
 }
 
@@ -92,11 +93,12 @@ export default function App() {
   const [aiStatus, setAiStatus] = useState('idle') // idle|uploading|processing|ready|error
   const [aiError, setAiError] = useState('')
   const [aiStepBusyId, setAiStepBusyId] = useState(null)
-  const [steps, setSteps] = useState([]) 
+  const [steps, setSteps] = useState([])
   const [busy, setBusy] = useState(false)
   const [selectedStepId, setSelectedStepId] = useState(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [imageEditorOpen, setImageEditorOpen] = useState(false)
+  const [projectsOpen, setProjectsOpen] = useState(false)
   const [editingStepId, setEditingStepId] = useState(null)
   const [error, setError] = useState('')
   const [capturing, setCapturing] = useState(false)
@@ -192,7 +194,7 @@ export default function App() {
     try {
       if (darkMode) document.documentElement.classList.add('dark')
       else document.documentElement.classList.remove('dark')
-    } catch {}
+    } catch { }
   }, [darkMode])
 
   function onPickVideo(file) {
@@ -232,7 +234,7 @@ export default function App() {
       if (!id) throw new Error('missing video_id')
 
       if (videoUrl && String(videoUrl).startsWith('blob:')) {
-        try { URL.revokeObjectURL(videoUrl) } catch {}
+        try { URL.revokeObjectURL(videoUrl) } catch { }
       }
 
       setSteps([])
@@ -443,7 +445,7 @@ export default function App() {
         if (s.id !== id) return s
         try {
           if (s.url) URL.revokeObjectURL(s.url)
-        } catch {}
+        } catch { }
         const url = URL.createObjectURL(blob)
         return { ...s, blob, url, has_image: true }
       })
@@ -491,274 +493,334 @@ export default function App() {
     }
   }
 
-    async function exportDoc() {
-      setError('')
-      if (steps.length === 0) {
-        setError('Capture pelo menos um frame antes de exportar.')
-        return
-      }
+  async function exportDoc() {
+    setError('')
+    if (steps.length === 0) {
+      setError('Capture pelo menos um frame antes de exportar.')
+      return
+    }
 
-      const rawPrefix = (imageNamePrefix || '').toString().trim()
-      if (!rawPrefix) {
-        setError('Preencha o prefixo do nome dos arquivos de imagem nas Configurações antes de exportar.')
-        return
-      }
+    const rawPrefix = (imageNamePrefix || '').toString().trim()
+    if (!rawPrefix) {
+      setError('Preencha o prefixo do nome dos arquivos de imagem nas Configurações antes de exportar.')
+      return
+    }
 
-      const parseFilenameFromContentDisposition = (value) => {
-        const cd = (value || '').toString()
-        // RFC 5987 / RFC 6266
-        const mStar = cd.match(/filename\*=UTF-8''([^;\n]+)/i)
-        if (mStar && mStar[1]) {
+    const parseFilenameFromContentDisposition = (value) => {
+      const cd = (value || '').toString()
+      // RFC 5987 / RFC 6266
+      const mStar = cd.match(/filename\*=UTF-8''([^;\n]+)/i)
+      if (mStar && mStar[1]) {
+        try {
+          return decodeURIComponent(mStar[1].trim().replace(/^"|"$/g, ''))
+        } catch {
+          return mStar[1].trim().replace(/^"|"$/g, '')
+        }
+      }
+      const m = cd.match(/filename=([^;\n]+)/i)
+      if (m && m[1]) return m[1].trim().replace(/^"|"$/g, '')
+      return ''
+    }
+
+    const sanitizePrefix = (raw) => {
+      let v = (raw || '').toString().trim()
+      if (!v) return 'step_'
+      // If user typed an extension, drop it to avoid "foo.png01.png"
+      v = v.replace(/\.png$/i, '')
+      // Remove path separators and keep it filename-friendly
+      v = v.replace(/[\\/]/g, '_')
+      v = v.replace(/\s+/g, '_')
+      v = v.replace(/[^a-zA-Z0-9._-]/g, '_')
+      v = v.slice(0, 60)
+      return v || 'step_'
+    }
+
+    const prefix = sanitizePrefix(rawPrefix)
+
+    setBusy(true)
+    try {
+      const form = new FormData()
+      form.append(
+        'steps',
+        JSON.stringify(
+          steps.map((s) => ({
+            description: s.description ?? '',
+            has_image: !!(s?.has_image && s?.blob),
+          }))
+        )
+      )
+      form.append('image_name_prefix', prefix)
+      form.append('output_format', outputFormat || 'markdown')
+
+      // Only send images for steps that actually have them.
+      steps.forEach((s, idx) => {
+        if (!s?.blob || !s?.has_image) return
+        const file = new File([s.blob], `${prefix}${String(idx + 1).padStart(2, '0')}.png`, { type: 'image/png' })
+        form.append('images', file)
+      })
+
+      const res = await api.post('/export', form, {
+        responseType: 'blob'
+      })
+
+      const cd = res?.headers?.['content-disposition']
+      const serverName = parseFilenameFromContentDisposition(cd)
+      const fallbackName = (outputFormat === 'html' ? 'tutorial.html' : outputFormat === 'docx' ? 'tutorial.docx' : outputFormat === 'pdf' ? 'tutorial.pdf' : outputFormat === 'plain' ? 'tutorial.txt' : 'clipbuilder_export.zip')
+      downloadBlob(res.data, serverName || fallbackName)
+    } catch (e) {
+      const status = e?.response?.status
+      let detail = e?.response?.data?.detail
+
+      // When responseType is 'blob', error bodies come as Blob (even for JSON).
+      if (!detail && e?.response?.data instanceof Blob) {
+        try {
+          const text = await e.response.data.text()
           try {
-            return decodeURIComponent(mStar[1].trim().replace(/^"|"$/g, ''))
+            const parsed = JSON.parse(text)
+            detail = parsed?.detail || text
           } catch {
-            return mStar[1].trim().replace(/^"|"$/g, '')
+            detail = text
+          }
+        } catch { }
+      }
+      if (status === 413) {
+        setError('Payload muito grande para exportar. Tente menos passos ou frames menores.')
+      } else if (status) {
+        setError(detail ? `Falha ao exportar: ${detail}` : `Falha ao exportar (HTTP ${status}).`)
+      } else {
+        setError('Falha ao exportar. Verifique se o backend está rodando.')
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function reorderSteps(fromId, toId) {
+    if (!fromId || !toId || fromId === toId) return
+    setSteps((prev) => {
+      const fromIndex = prev.findIndex((s) => s.id === fromId)
+      const toIndex = prev.findIndex((s) => s.id === toId)
+      if (fromIndex === -1 || toIndex === -1 || fromIndex === toIndex) {
+        return prev
+      }
+      const next = [...prev]
+      const [moved] = next.splice(fromIndex, 1)
+      next.splice(toIndex, 0, moved)
+      return next
+    })
+  }
+
+  // Handlers to pass to Sidebar
+  function handleSelectStep(id) {
+    setSelectedStepId(id)
+  }
+
+  function handleEditImage(id) {
+    const step = steps.find((s) => s.id === id)
+    if (!step?.url || !step?.blob || !step?.has_image) return
+    setEditingStepId(id)
+    setImageEditorOpen(true)
+  }
+
+  async function handleLoadProject(project) {
+    // Convert project steps back to app format
+    const loadedSteps = await Promise.all(
+      (project.steps || []).map(async (step) => {
+        let blob = null
+        let url = ''
+
+        if (step.has_image && step.image_base64) {
+          try {
+            const res = await fetch(step.image_base64)
+            blob = await res.blob()
+            url = URL.createObjectURL(blob)
+          } catch {
+            // ignore conversion errors
           }
         }
-        const m = cd.match(/filename=([^;\n]+)/i)
-        if (m && m[1]) return m[1].trim().replace(/^"|"$/g, '')
-        return ''
-      }
 
-      const sanitizePrefix = (raw) => {
-        let v = (raw || '').toString().trim()
-        if (!v) return 'step_'
-        // If user typed an extension, drop it to avoid "foo.png01.png"
-        v = v.replace(/\.png$/i, '')
-        // Remove path separators and keep it filename-friendly
-        v = v.replace(/[\\/]/g, '_')
-        v = v.replace(/\s+/g, '_')
-        v = v.replace(/[^a-zA-Z0-9._-]/g, '_')
-        v = v.slice(0, 60)
-        return v || 'step_'
-      }
-
-      const prefix = sanitizePrefix(rawPrefix)
-
-      setBusy(true)
-      try {
-        const form = new FormData()
-        form.append(
-          'steps',
-          JSON.stringify(
-            steps.map((s) => ({
-              description: s.description ?? '',
-              has_image: !!(s?.has_image && s?.blob),
-            }))
-          )
-        )
-        form.append('image_name_prefix', prefix)
-        form.append('output_format', outputFormat || 'markdown')
-
-        // Only send images for steps that actually have them.
-        steps.forEach((s, idx) => {
-          if (!s?.blob || !s?.has_image) return
-          const file = new File([s.blob], `${prefix}${String(idx + 1).padStart(2, '0')}.png`, { type: 'image/png' })
-          form.append('images', file)
-        })
-
-        const res = await api.post('/export', form, {
-          responseType: 'blob'
-        })
-
-        const cd = res?.headers?.['content-disposition']
-        const serverName = parseFilenameFromContentDisposition(cd)
-        const fallbackName = (outputFormat === 'html' ? 'tutorial.html' : outputFormat === 'docx' ? 'tutorial.docx' : outputFormat === 'pdf' ? 'tutorial.pdf' : outputFormat === 'plain' ? 'tutorial.txt' : 'clipbuilder_export.zip')
-        downloadBlob(res.data, serverName || fallbackName)
-      } catch (e) {
-        const status = e?.response?.status
-        let detail = e?.response?.data?.detail
-
-        // When responseType is 'blob', error bodies come as Blob (even for JSON).
-        if (!detail && e?.response?.data instanceof Blob) {
-          try {
-            const text = await e.response.data.text()
-            try {
-              const parsed = JSON.parse(text)
-              detail = parsed?.detail || text
-            } catch {
-              detail = text
-            }
-          } catch {}
+        return {
+          id: crypto.randomUUID(),
+          description: step.description || '',
+          timestamp: step.timestamp || '',
+          seconds: null,
+          has_image: step.has_image && !!blob,
+          blob,
+          url,
         }
-        if (status === 413) {
-          setError('Payload muito grande para exportar. Tente menos passos ou frames menores.')
-        } else if (status) {
-          setError(detail ? `Falha ao exportar: ${detail}` : `Falha ao exportar (HTTP ${status}).`)
-        } else {
-          setError('Falha ao exportar. Verifique se o backend está rodando.')
-        }
-      } finally {
-        setBusy(false)
-      }
-    }
-
-    function reorderSteps(fromId, toId) {
-      if (!fromId || !toId || fromId === toId) return
-      setSteps((prev) => {
-        const fromIndex = prev.findIndex((s) => s.id === fromId)
-        const toIndex = prev.findIndex((s) => s.id === toId)
-        if (fromIndex === -1 || toIndex === -1 || fromIndex === toIndex) {
-          return prev
-        }
-        const next = [...prev]
-        const [moved] = next.splice(fromIndex, 1)
-        next.splice(toIndex, 0, moved)
-        return next
       })
+    )
+
+    // Clear current steps
+    steps.forEach((s) => {
+      if (s.url) {
+        try {
+          URL.revokeObjectURL(s.url)
+        } catch { }
+      }
+    })
+
+    setSteps(loadedSteps)
+    setSelectedStepId(null)
+    if (project.video_id) {
+      setVideoId(project.video_id)
     }
+  }
 
-    // Handlers to pass to Sidebar
-    function handleSelectStep(id) {
-      setSelectedStepId(id)
-    }
+  const editingStep = steps.find((s) => s.id === editingStepId) || null
 
-    function handleEditImage(id) {
-      const step = steps.find((s) => s.id === id)
-      if (!step?.url || !step?.blob || !step?.has_image) return
-      setEditingStepId(id)
-      setImageEditorOpen(true)
-    }
+  return (
+    <div className="min-h-screen" style={{ backgroundColor: 'var(--bg)', color: 'var(--text)' }}>
+      <Header darkMode={darkMode} setDarkMode={setDarkMode} stepsCount={steps.length} exportDoc={exportDoc} busy={busy} />
 
-    const editingStep = steps.find((s) => s.id === editingStepId) || null
+      <main className="mx-auto grid max-w-7xl grid-cols-1 gap-6 px-6 py-6 lg:grid-cols-[1fr_400px]">
+        <section className="cb-panel">
+          <div className="flex flex-col items-center gap-8">
+            <VideoArea
+              videoUrl={videoUrl}
+              videoRef={videoRef}
+              canvasRef={canvasRef}
+              onPickVideo={onPickVideo}
+              youtubeUrl={youtubeUrl}
+              setYoutubeUrl={setYoutubeUrl}
+              onImportYoutube={importYoutube}
+              youtubeImporting={youtubeImporting}
+              capturing={capturing}
+              aiStatus={aiStatus}
+            />
 
-    return (
-      <div className="min-h-screen" style={{ backgroundColor: 'var(--bg)', color: 'var(--text)' }}>
-        <Header darkMode={darkMode} setDarkMode={setDarkMode} stepsCount={steps.length} exportDoc={exportDoc} busy={busy} />
-
-        <main className="mx-auto grid max-w-7xl grid-cols-1 gap-6 px-6 py-6 lg:grid-cols-[1fr_400px]">
-          <section className="cb-panel">
-            <div className="flex flex-col items-center gap-8">
-              <VideoArea
-                videoUrl={videoUrl}
-                videoRef={videoRef}
-                canvasRef={canvasRef}
-                onPickVideo={onPickVideo}
-                youtubeUrl={youtubeUrl}
-                setYoutubeUrl={setYoutubeUrl}
-                onImportYoutube={importYoutube}
-                youtubeImporting={youtubeImporting}
-                capturing={capturing}
-                aiStatus={aiStatus}
-              />
-
-              <div className="w-full max-w-[960px]">
-                {steps.length === 0 ? (
-                  <div className="text-center py-4">
-                    <div className="text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Capture frames para montar o tutorial</div>
-                    <div className="text-xs" style={{ color: 'var(--muted-text)' }}>Use a tecla <kbd className="px-1.5 py-0.5 rounded text-xs font-mono border" style={{ borderColor: 'var(--card-border)', backgroundColor: 'var(--card-bg)' }}>S</kbd> para capturar rapidamente</div>
-                  </div>
-                ) : (
-                  <div className="text-center py-4">
-                    <div className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>Selecione um passo à direita para editar</div>
-                  </div>
-                )}
-              </div>
-              <div className="w-full max-w-[960px]">
-                <div className="space-y-3">
-                  <button
-                    onClick={captureFrame}
-                    disabled={!videoUrl || capturing}
-                    className="cb-btn cb-btn-primary w-full h-12 text-base font-semibold"
-                  >
-                    <Play className="h-5 w-5" />
-                    {capturing ? 'Capturando...' : 'Capturar Novo Passo'}
-                  </button>
-                  <div className="grid grid-cols-2 gap-3">
-                    <button
-                      onClick={createTextStep}
-                      className="cb-btn w-full h-11"
-                    >
-                      <FileVideo className="h-4 w-4" />
-                      Passo texto
-                    </button>
-                    <button
-                      onClick={() => setSettingsOpen(true)}
-                      className="cb-btn w-full h-11"
-                    >
-                      <Settings className="h-4 w-4" />
-                      Configurações
-                    </button>
-                  </div>
-                  <button
-                    onClick={exportDoc}
-                    disabled={busy || steps.length === 0}
-                    className="cb-btn w-full h-11 font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <Download className="h-4 w-4" />
-                    {busy ? 'Exportando...' : 'Exportar Tutorial'}
-                  </button>
-
-                  {(error || aiError) ? (
-                    <div className="rounded-lg border p-4 text-sm" style={{ borderColor: error ? 'var(--danger)' : 'var(--warning)', backgroundColor: error ? 'var(--danger-bg)' : 'var(--warning-bg)', color: error ? 'var(--danger)' : 'var(--warning)' }}>
-                      {error ? (
-                        <div className="flex items-start gap-2">
-                          <svg className="h-4 w-4 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-                          </svg>
-                          <span>{error}</span>
-                        </div>
-                      ) : null}
-                      {aiError ? (
-                        <div className="flex items-start gap-2">
-                          <svg className="h-4 w-4 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                            <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                          </svg>
-                          <span>{aiError}</span>
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : null}
+            <div className="w-full max-w-[960px]">
+              {steps.length === 0 ? (
+                <div className="text-center py-4">
+                  <div className="text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Capture frames para montar o tutorial</div>
+                  <div className="text-xs" style={{ color: 'var(--muted-text)' }}>Use a tecla <kbd className="px-1.5 py-0.5 rounded text-xs font-mono border" style={{ borderColor: 'var(--card-border)', backgroundColor: 'var(--card-bg)' }}>S</kbd> para capturar rapidamente</div>
                 </div>
+              ) : (
+                <div className="text-center py-4">
+                  <div className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>Selecione um passo à direita para editar</div>
+                </div>
+              )}
+            </div>
+            <div className="w-full max-w-[960px]">
+              <div className="space-y-3">
+                <button
+                  onClick={captureFrame}
+                  disabled={!videoUrl || capturing}
+                  className="cb-btn cb-btn-primary w-full h-12 text-base font-semibold"
+                >
+                  <Play className="h-5 w-5" />
+                  {capturing ? 'Capturando...' : 'Capturar Novo Passo'}
+                </button>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={createTextStep}
+                    className="cb-btn w-full h-11"
+                  >
+                    <FileVideo className="h-4 w-4" />
+                    Passo texto
+                  </button>
+                  <button
+                    onClick={() => setSettingsOpen(true)}
+                    className="cb-btn w-full h-11"
+                  >
+                    <Settings className="h-4 w-4" />
+                    Configurações
+                  </button>
+                </div>
+                <button
+                  onClick={exportDoc}
+                  disabled={busy || steps.length === 0}
+                  className="cb-btn w-full h-11 font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Download className="h-4 w-4" />
+                  {busy ? 'Exportando...' : 'Exportar Tutorial'}
+                </button>
+                <button
+                  onClick={() => setProjectsOpen(true)}
+                  className="cb-btn w-full h-11"
+                >
+                  <FolderOpen className="h-4 w-4" />
+                  Projetos Salvos
+                </button>
+
+                {(error || aiError) ? (
+                  <div className="rounded-lg border p-4 text-sm" style={{ borderColor: error ? 'var(--danger)' : 'var(--warning)', backgroundColor: error ? 'var(--danger-bg)' : 'var(--warning-bg)', color: error ? 'var(--danger)' : 'var(--warning)' }}>
+                    {error ? (
+                      <div className="flex items-start gap-2">
+                        <svg className="h-4 w-4 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                        </svg>
+                        <span>{error}</span>
+                      </div>
+                    ) : null}
+                    {aiError ? (
+                      <div className="flex items-start gap-2">
+                        <svg className="h-4 w-4 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                        </svg>
+                        <span>{aiError}</span>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
             </div>
-          </section>
+          </div>
+        </section>
 
-          <Sidebar
-            steps={steps}
-            selectedStepId={selectedStepId}
-            setSelectedStepId={handleSelectStep}
-            reorderSteps={reorderSteps}
-            updateDescription={updateDescription}
-            generateWithAI={generateWithAI}
-            removeStep={removeStep}
-            aiStepBusyId={aiStepBusyId}
-            videoId={videoId}
-            aiStatus={aiStatus}
-            darkMode={darkMode}
-            onEditImage={handleEditImage}
-          />
-          <ImageEditorModal
-            open={imageEditorOpen}
-            step={editingStep}
-            onClose={() => {
-              setImageEditorOpen(false)
-              setEditingStepId(null)
-            }}
-            onSave={(blob) => {
-              if (!editingStepId) return
-              updateStepImage(editingStepId, blob)
-            }}
-          />
-          <SettingsModal
-            open={settingsOpen}
-            onClose={() => setSettingsOpen(false)}
-            aiContext={aiContext}
-            setAiContext={setAiContext}
-            savedPrompt={savedPrompt}
-            setSavedPrompt={setSavedPrompt}
-            includeTimestamp={includeTimestamp}
-            setIncludeTimestamp={setIncludeTimestamp}
-            geminiModel={geminiModel}
-            setGeminiModel={setGeminiModel}
-            outputFormat={outputFormat}
-            setOutputFormat={setOutputFormat}
-            imageNamePrefix={imageNamePrefix}
-            setImageNamePrefix={setImageNamePrefix}
-            aiFillEnabled={aiFillEnabled}
-            setAiFillEnabled={setAiFillEnabled}
-          />
-        </main>
-      </div>
-    )
-  }
+        <Sidebar
+          steps={steps}
+          selectedStepId={selectedStepId}
+          setSelectedStepId={handleSelectStep}
+          reorderSteps={reorderSteps}
+          updateDescription={updateDescription}
+          generateWithAI={generateWithAI}
+          removeStep={removeStep}
+          aiStepBusyId={aiStepBusyId}
+          videoId={videoId}
+          aiStatus={aiStatus}
+          darkMode={darkMode}
+          onEditImage={handleEditImage}
+        />
+        <ImageEditorModal
+          open={imageEditorOpen}
+          step={editingStep}
+          onClose={() => {
+            setImageEditorOpen(false)
+            setEditingStepId(null)
+          }}
+          onSave={(blob) => {
+            if (!editingStepId) return
+            updateStepImage(editingStepId, blob)
+          }}
+        />
+        <SettingsModal
+          open={settingsOpen}
+          onClose={() => setSettingsOpen(false)}
+          aiContext={aiContext}
+          setAiContext={setAiContext}
+          savedPrompt={savedPrompt}
+          setSavedPrompt={setSavedPrompt}
+          includeTimestamp={includeTimestamp}
+          setIncludeTimestamp={setIncludeTimestamp}
+          geminiModel={geminiModel}
+          setGeminiModel={setGeminiModel}
+          outputFormat={outputFormat}
+          setOutputFormat={setOutputFormat}
+          imageNamePrefix={imageNamePrefix}
+          setImageNamePrefix={setImageNamePrefix}
+          aiFillEnabled={aiFillEnabled}
+          setAiFillEnabled={setAiFillEnabled}
+        />
+        <ProjectsModal
+          open={projectsOpen}
+          onClose={() => setProjectsOpen(false)}
+          steps={steps}
+          videoId={videoId}
+          onLoadProject={handleLoadProject}
+          onExport={exportDoc}
+        />
+      </main>
+    </div>
+  )
+}

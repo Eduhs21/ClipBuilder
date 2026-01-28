@@ -160,6 +160,9 @@ DATA_DIR = Path(os.getenv("CLIPBUILDER_DATA_DIR", Path(__file__).resolve().paren
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 logger.info("config: CLIPBUILDER_DATA_DIR=%s", DATA_DIR)
 
+PROJECTS_DIR = DATA_DIR / "projects"
+PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
+
 _videos_lock = threading.Lock()
 _videos: dict[str, VideoEntry] = {}
 
@@ -1260,3 +1263,218 @@ async def export_documentation(
 
     headers = {"Content-Disposition": 'attachment; filename="clipbuilder_export.zip"'}
     return StreamingResponse(zip_buffer, media_type="application/zip", headers=headers)
+
+
+# ==============================================================================
+# PROJECTS ENDPOINTS - Salvar/Carregar Projetos de Passos
+# ==============================================================================
+
+
+@dataclass
+class ProjectStep:
+    order: int
+    description: str
+    timestamp: str
+    has_image: bool = True
+    image_base64: str | None = None
+
+
+@dataclass
+class Project:
+    id: str
+    name: str
+    created_at: str
+    updated_at: str
+    video_id: str | None
+    steps: list[dict[str, Any]]
+
+
+def _load_project(project_id: str) -> dict[str, Any] | None:
+    """Load a project from disk by ID."""
+    project_file = PROJECTS_DIR / f"{project_id}.json"
+    if not project_file.exists():
+        return None
+    try:
+        with project_file.open("r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _save_project(project: dict[str, Any]) -> None:
+    """Save a project to disk."""
+    project_file = PROJECTS_DIR / f"{project['id']}.json"
+    with project_file.open("w", encoding="utf-8") as f:
+        json.dump(project, f, ensure_ascii=False, indent=2)
+
+
+def _get_iso_now() -> str:
+    """Return current UTC time in ISO 8601 format."""
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat()
+
+
+@app.post("/projects")
+async def create_project(request: Request):
+    """Criar um novo projeto de passos."""
+    try:
+        payload = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Body inválido. Envie JSON.") from exc
+
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Body deve ser um objeto JSON.")
+
+    name = (payload.get("name") or "").strip()
+    if not name:
+        name = "Projeto sem nome"
+
+    video_id = payload.get("video_id")
+    steps = payload.get("steps", [])
+
+    if not isinstance(steps, list):
+        raise HTTPException(status_code=400, detail="'steps' deve ser uma lista.")
+
+    # Validar e normalizar steps
+    normalized_steps: list[dict[str, Any]] = []
+    for i, step in enumerate(steps):
+        if not isinstance(step, dict):
+            raise HTTPException(status_code=400, detail=f"Step {i} deve ser um objeto.")
+        
+        normalized_steps.append({
+            "order": step.get("order", i + 1),
+            "description": str(step.get("description", "")),
+            "timestamp": str(step.get("timestamp", "")),
+            "has_image": bool(step.get("has_image", True)),
+            "image_base64": step.get("image_base64"),
+        })
+
+    now = _get_iso_now()
+    project_id = uuid.uuid4().hex
+
+    project = {
+        "id": project_id,
+        "name": name,
+        "created_at": now,
+        "updated_at": now,
+        "video_id": video_id,
+        "steps": normalized_steps,
+    }
+
+    try:
+        _save_project(project)
+    except OSError as exc:
+        logger.error("failed to save project %s: %s", project_id, exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Falha ao salvar projeto.") from exc
+
+    logger.info("project created: id=%s name=%s steps=%d", project_id, name, len(normalized_steps))
+    return project
+
+
+@app.get("/projects")
+async def list_projects():
+    """Listar todos os projetos salvos (resumo sem imagens)."""
+    projects: list[dict[str, Any]] = []
+
+    for project_file in PROJECTS_DIR.glob("*.json"):
+        try:
+            with project_file.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+            
+            # Retornar resumo (sem imagens base64 para performance)
+            projects.append({
+                "id": data.get("id"),
+                "name": data.get("name"),
+                "created_at": data.get("created_at"),
+                "updated_at": data.get("updated_at"),
+                "video_id": data.get("video_id"),
+                "steps_count": len(data.get("steps", [])),
+            })
+        except Exception as exc:
+            logger.warning("failed to load project %s: %s", project_file.name, exc)
+            continue
+
+    # Ordenar por data de atualização (mais recente primeiro)
+    projects.sort(key=lambda p: p.get("updated_at") or "", reverse=True)
+    return {"projects": projects}
+
+
+@app.get("/projects/{project_id}")
+async def get_project(project_id: str):
+    """Carregar um projeto completo pelo ID."""
+    project = _load_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Projeto não encontrado.")
+    return project
+
+
+@app.put("/projects/{project_id}")
+async def update_project(project_id: str, request: Request):
+    """Atualizar um projeto existente."""
+    project = _load_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Projeto não encontrado.")
+
+    try:
+        payload = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Body inválido. Envie JSON.") from exc
+
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Body deve ser um objeto JSON.")
+
+    # Atualizar campos permitidos
+    if "name" in payload:
+        project["name"] = str(payload["name"]).strip() or project["name"]
+
+    if "video_id" in payload:
+        project["video_id"] = payload["video_id"]
+
+    if "steps" in payload:
+        steps = payload["steps"]
+        if not isinstance(steps, list):
+            raise HTTPException(status_code=400, detail="'steps' deve ser uma lista.")
+        
+        normalized_steps: list[dict[str, Any]] = []
+        for i, step in enumerate(steps):
+            if not isinstance(step, dict):
+                raise HTTPException(status_code=400, detail=f"Step {i} deve ser um objeto.")
+            
+            normalized_steps.append({
+                "order": step.get("order", i + 1),
+                "description": str(step.get("description", "")),
+                "timestamp": str(step.get("timestamp", "")),
+                "has_image": bool(step.get("has_image", True)),
+                "image_base64": step.get("image_base64"),
+            })
+        
+        project["steps"] = normalized_steps
+
+    project["updated_at"] = _get_iso_now()
+
+    try:
+        _save_project(project)
+    except OSError as exc:
+        logger.error("failed to update project %s: %s", project_id, exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Falha ao atualizar projeto.") from exc
+
+    logger.info("project updated: id=%s", project_id)
+    return project
+
+
+@app.delete("/projects/{project_id}")
+async def delete_project(project_id: str):
+    """Deletar um projeto."""
+    project_file = PROJECTS_DIR / f"{project_id}.json"
+    if not project_file.exists():
+        raise HTTPException(status_code=404, detail="Projeto não encontrado.")
+
+    try:
+        project_file.unlink()
+    except OSError as exc:
+        logger.error("failed to delete project %s: %s", project_id, exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Falha ao deletar projeto.") from exc
+
+    logger.info("project deleted: id=%s", project_id)
+    return {"message": "Projeto deletado com sucesso.", "id": project_id}
+
