@@ -8,6 +8,9 @@ import Sidebar from './components/Sidebar'
 import SettingsModal from './components/SettingsModalExtended'
 import ImageEditorModal from './components/ImageEditorModal'
 import ImportMarkdownModal from './components/ImportMarkdownModal'
+import EnhancedDocPreview from './components/EnhancedDocPreview'
+import GifPreviewModal from './components/GifPreviewModal'
+import GIF from 'gif.js'
 import { Play, FileVideo, Wand2, Settings, Download, Upload, FileText } from 'lucide-react'
 
 const LS = {
@@ -80,6 +83,8 @@ export default function App() {
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
   const youtubePollRef = useRef(null)
+  const gifEncoderRef = useRef(null)
+  const gifFrameIntervalRef = useRef(null)
 
   const [videoUrl, setVideoUrl] = useState(null)
   const [videoId, setVideoId] = useState(null)
@@ -146,10 +151,24 @@ export default function App() {
   // === NOVOS ESTADOS PARA MARKDOWN ===
   const [importModalOpen, setImportModalOpen] = useState(false)
   const [documentTitle, setDocumentTitle] = useState('Novo Processo')
+
+  // === ESTADOS PARA ENHANCEMENT COM GROQ ===
+  const [enhanceLoading, setEnhanceLoading] = useState(false)
+  const [enhancedMarkdown, setEnhancedMarkdown] = useState('')
+  const [enhancePreviewOpen, setEnhancePreviewOpen] = useState(false)
   const [documentStatus, setDocumentStatus] = useState('em_progresso') // em_progresso | pausado | concluido
   const [lastCompletedStep, setLastCompletedStep] = useState(0)
   const [documentOverview, setDocumentOverview] = useState('')
   const [documentGeneratedAt, setDocumentGeneratedAt] = useState(() => new Date().toISOString())
+
+  // === ESTADOS PARA GRAVAÇÃO DE GIF ===
+  const [isRecordingGif, setIsRecordingGif] = useState(false)
+  const [gifProgress, setGifProgress] = useState(0)
+  const [gifBlob, setGifBlob] = useState(null)
+  const [gifUrl, setGifUrl] = useState('')
+  const [gifPreviewOpen, setGifPreviewOpen] = useState(false)
+  const [isGeneratingGif, setIsGeneratingGif] = useState(false)
+  const [gifDescribeLoading, setGifDescribeLoading] = useState(false)
 
   const totalImageBytes = useMemo(() => {
     return steps.reduce((sum, s) => sum + (s.blob?.size ?? 0), 0)
@@ -666,6 +685,52 @@ export default function App() {
     }
   }
 
+  // === FUNÇÃO DE ENHANCEMENT COM GROQ ===
+  async function enhanceDocument() {
+    setError('')
+    setAiError('')
+
+    if (steps.length === 0) {
+      setError('Capture pelo menos um passo antes de gerar o documento profissional.')
+      return
+    }
+
+    setEnhanceLoading(true)
+    try {
+      // Preparar os passos para enviar
+      const stepsPayload = steps.map((step) => ({
+        description: step.description || '',
+        timestamp: step.timestamp || '',
+        has_image: !!step.has_image
+      }))
+
+      const response = await api.post('/enhance-document', {
+        title: documentTitle || 'Documento Sem Título',
+        steps: stepsPayload
+      })
+
+      const markdown = response?.data?.markdown || ''
+      if (!markdown) {
+        throw new Error('Resposta vazia do servidor')
+      }
+
+      setEnhancedMarkdown(markdown)
+      setEnhancePreviewOpen(true)
+    } catch (e) {
+      const status = e?.response?.status
+      const detail = e?.response?.data?.detail
+      if (status === 429) {
+        setAiError(detail || 'Limite de requisições do Groq excedido. Tente novamente em alguns segundos.')
+      } else if (status === 400) {
+        setAiError(detail || 'Erro nos dados enviados.')
+      } else {
+        setAiError(detail || 'Falha ao gerar documento profissional. Verifique se o backend está rodando e a API Key do Groq está configurada.')
+      }
+    } finally {
+      setEnhanceLoading(false)
+    }
+  }
+
   async function exportDoc() {
     setError('')
     if (steps.length === 0) {
@@ -795,6 +860,158 @@ export default function App() {
     setImageEditorOpen(true)
   }
 
+  // === FUNÇÕES DE GRAVAÇÃO DE GIF ===
+  function startGifRecording() {
+    if (!videoRef.current || !canvasRef.current || !videoUrl) {
+      setError('Carregue um vídeo primeiro para gravar GIF.')
+      return
+    }
+
+    setError('')
+    setIsRecordingGif(true)
+    setGifProgress(0)
+
+    const video = videoRef.current
+    const canvas = canvasRef.current
+
+    // Configurar canvas com tamanho do vídeo
+    canvas.width = video.videoWidth
+    canvas.height = video.videoHeight
+    const ctx = canvas.getContext('2d')
+
+    // Criar encoder GIF
+    const gif = new GIF({
+      workers: 2,
+      quality: 10,
+      width: canvas.width,
+      height: canvas.height,
+      workerScript: '/gif.worker.js'
+    })
+
+    gifEncoderRef.current = gif
+
+    // Iniciar o vídeo se estiver pausado
+    if (video.paused) {
+      video.play().catch(() => { })
+    }
+
+    // Capturar frames a cada 100ms (10 FPS)
+    gifFrameIntervalRef.current = setInterval(() => {
+      try {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+        gif.addFrame(ctx, { copy: true, delay: 100 })
+      } catch (e) {
+        console.error('Erro ao capturar frame:', e)
+      }
+    }, 100)
+  }
+
+  function stopGifRecording() {
+    setIsRecordingGif(false)
+
+    // Parar captura de frames
+    if (gifFrameIntervalRef.current) {
+      clearInterval(gifFrameIntervalRef.current)
+      gifFrameIntervalRef.current = null
+    }
+
+    // Pausar vídeo
+    if (videoRef.current) {
+      videoRef.current.pause()
+    }
+
+    const gif = gifEncoderRef.current
+    if (!gif) return
+
+    setIsGeneratingGif(true)
+    setGifPreviewOpen(true)
+
+    gif.on('progress', (p) => {
+      setGifProgress(p)
+    })
+
+    gif.on('finished', (blob) => {
+      setGifBlob(blob)
+      setGifUrl(URL.createObjectURL(blob))
+      setIsGeneratingGif(false)
+      gifEncoderRef.current = null
+    })
+
+    gif.render()
+  }
+
+  async function addGifAsStep() {
+    if (!gifBlob) return
+
+    setGifDescribeLoading(true)
+    let description = 'GIF animado'
+
+    try {
+      const form = new FormData()
+      form.append('file', new File([gifBlob], 'clipbuilder.gif', { type: 'image/gif' }))
+      if (documentTitle && documentTitle.trim()) {
+        form.append('document_title', documentTitle.trim())
+      }
+      const contextParts = []
+      if (documentTitle && documentTitle.trim()) {
+        contextParts.push(`Título: ${documentTitle.trim()}`)
+      }
+      steps.forEach((s, i) => {
+        if (s.description && s.description.trim()) {
+          contextParts.push(`Passo ${i + 1}: ${s.description.trim()}`)
+        }
+      })
+      if (contextParts.length > 0) {
+        form.append('document_context', contextParts.join('\n'))
+      }
+
+      const res = await api.post('/describe-gif', form, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      })
+      const text = res?.data?.description
+      if (text && typeof text === 'string' && text.trim()) {
+        description = text.trim()
+      }
+    } catch (_) {
+      // Keep fallback "GIF animado"
+    } finally {
+      setGifDescribeLoading(false)
+    }
+
+    const id = crypto.randomUUID()
+    setSteps((prev) => [
+      ...prev,
+      {
+        id,
+        blob: gifBlob,
+        url: gifUrl,
+        description,
+        timestamp: '',
+        seconds: null,
+        has_image: true,
+        is_gif: true
+      }
+    ])
+    setSelectedStepId(id)
+    closeGifPreview()
+  }
+
+  function downloadGif() {
+    if (!gifBlob) return
+    downloadBlob(gifBlob, `clipbuilder_gif_${Date.now()}.gif`)
+  }
+
+  function closeGifPreview() {
+    setGifPreviewOpen(false)
+    setGifBlob(null)
+    if (gifUrl) {
+      URL.revokeObjectURL(gifUrl)
+      setGifUrl('')
+    }
+    setGifProgress(0)
+    setIsGeneratingGif(false)
+  }
+
   const editingStep = steps.find((s) => s.id === editingStepId) || null
 
   return (
@@ -815,6 +1032,9 @@ export default function App() {
               youtubeImporting={youtubeImporting}
               capturing={capturing}
               aiStatus={aiStatus}
+              isRecordingGif={isRecordingGif}
+              onStartGifRecording={startGifRecording}
+              onStopGifRecording={stopGifRecording}
             />
 
             <div className="w-full max-w-[960px]">
@@ -934,12 +1154,31 @@ export default function App() {
           setAiFillEnabled={setAiFillEnabled}
           onExportMarkdown={exportMarkdownDoc}
           onImportMarkdown={() => setImportModalOpen(true)}
+          onEnhanceDocument={enhanceDocument}
           stepsCount={steps.length}
+          enhanceLoading={enhanceLoading}
         />
         <ImportMarkdownModal
           open={importModalOpen}
           onClose={() => setImportModalOpen(false)}
           onImport={handleImportMarkdown}
+        />
+        <EnhancedDocPreview
+          open={enhancePreviewOpen}
+          onClose={() => setEnhancePreviewOpen(false)}
+          markdown={enhancedMarkdown}
+          title={documentTitle}
+        />
+        <GifPreviewModal
+          isOpen={gifPreviewOpen}
+          onClose={closeGifPreview}
+          gifUrl={gifUrl}
+          gifBlob={gifBlob}
+          onAddToDoc={addGifAsStep}
+          onDownload={downloadGif}
+          isGenerating={isGeneratingGif}
+          progress={gifProgress}
+          gifDescribeLoading={gifDescribeLoading}
         />
       </main>
     </div>

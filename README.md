@@ -5,18 +5,20 @@ ClipBuilder transforma vídeos em tutoriais passo‑a‑passo e exporta em **HTM
 ## Como funciona
 
 1) Você faz **upload** de um vídeo (MP4/MKV) ou **importa do YouTube**.
-2) O app permite **capturar frames** do vídeo e organizar em uma lista de “passos”.
+2) O app permite **capturar frames** do vídeo e organizar em uma lista de "passos".
 3) Para cada passo, você pode:
 	- escrever/editar a descrição manualmente
 	- pedir para a IA (**Gemini** ou **Groq/Llama 4**) gerar a descrição com base no **timestamp**
 	- editar a imagem do passo (corte/anotações)
-4) No fim, você exporta o tutorial em:
+4) **Gravar GIF**: você pode gravar GIFs animados diretamente do vídeo e adicioná-los como passos. A IA analisa o GIF e gera automaticamente a descrição do passo.
+5) **Gerar Documento Profissional**: nas configurações, clique em "🪄 Gerar Documento Profissional" para que o Groq transforme seus passos em um documento estruturado com visão geral, seções numeradas, checklists e troubleshooting.
+6) No fim, você exporta o tutorial em:
 	- **Markdown** (inclui opção de ZIP com imagens)
 	- **HTML**
 	- **DOCX (Word)**
 	- **PDF**
 	- **Texto simples**
-5) Você também pode **importar** documentação existente (arquivo `.md` ou `.zip` com imagens)
+7) Você também pode **importar** documentação existente (arquivo `.md` ou `.zip` com imagens)
 
 ## O que foi usado (stack)
 

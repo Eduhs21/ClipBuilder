@@ -1,0 +1,138 @@
+import React from 'react'
+import { X, Download, Plus } from 'lucide-react'
+import GifStepPreview from './GifStepPreview'
+
+export default function GifPreviewModal({
+    isOpen,
+    onClose,
+    gifUrl,
+    gifBlob,
+    onAddToDoc,
+    onDownload,
+    isGenerating,
+    progress,
+    gifDescribeLoading = false
+}) {
+    if (!isOpen) return null
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+            <div
+                className="relative w-full max-w-2xl mx-4 rounded-xl border shadow-2xl"
+                style={{
+                    backgroundColor: 'var(--card-bg)',
+                    borderColor: 'var(--panel-border)'
+                }}
+            >
+                {/* Header + primary CTA */}
+                <div
+                    className="flex items-center justify-between gap-3 px-5 py-4 border-b flex-wrap"
+                    style={{ borderColor: 'var(--panel-border)' }}
+                >
+                    <h2 className="text-lg font-semibold" style={{ color: 'var(--text)' }}>
+                        {isGenerating ? 'Gerando GIF...' : 'Preview do GIF'}
+                    </h2>
+                    <div className="flex items-center gap-2">
+                        {!isGenerating && gifUrl && (
+                            <button
+                                onClick={onAddToDoc}
+                                disabled={gifDescribeLoading}
+                                className="cb-btn cb-btn-primary flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                title="Adicionar este GIF como um passo no documento"
+                            >
+                                <Plus className="h-4 w-4" />
+                                {gifDescribeLoading ? 'Gerando legenda...' : 'Posicionar como Passo'}
+                            </button>
+                        )}
+                        <button
+                            onClick={onClose}
+                            className="p-1.5 rounded-lg transition-colors hover:bg-[var(--accent-light)]"
+                            style={{ color: 'var(--text-secondary)' }}
+                            disabled={isGenerating}
+                        >
+                            <X className="h-5 w-5" />
+                        </button>
+                    </div>
+                </div>
+
+                {/* Content */}
+                <div className="p-5">
+                    {isGenerating ? (
+                        <div className="flex flex-col items-center justify-center py-12">
+                            <div className="relative mb-4">
+                                <svg className="h-16 w-16 animate-spin" style={{ color: 'var(--accent)' }} viewBox="0 0 24 24">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"></circle>
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                                </svg>
+                            </div>
+                            <div className="text-base font-medium mb-2" style={{ color: 'var(--text)' }}>
+                                Processando frames...
+                            </div>
+                            <div className="w-64 h-2 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--panel-border)' }}>
+                                <div
+                                    className="h-full transition-all duration-300 rounded-full"
+                                    style={{
+                                        width: `${Math.round(progress * 100)}%`,
+                                        backgroundColor: 'var(--accent)'
+                                    }}
+                                />
+                            </div>
+                            <div className="text-sm mt-2" style={{ color: 'var(--text-secondary)' }}>
+                                {Math.round(progress * 100)}%
+                            </div>
+                        </div>
+                    ) : gifUrl ? (
+                        <div className="flex flex-col items-center">
+                            <div
+                                className="rounded-lg overflow-hidden border mb-4 w-full flex justify-center"
+                                style={{ borderColor: 'var(--panel-border)', backgroundColor: '#000' }}
+                            >
+                                <GifStepPreview
+                                    gifUrl={gifUrl}
+                                    alt="GIF Preview"
+                                    className="max-w-full max-h-[400px]"
+                                    imgClassName="max-w-full max-h-[400px] object-contain"
+                                />
+                            </div>
+                            {gifBlob && (
+                                <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                                    Tamanho: {(gifBlob.size / 1024).toFixed(1)} KB
+                                </div>
+                            )}
+                        </div>
+                    ) : null}
+                </div>
+
+                {/* Footer */}
+                {!isGenerating && gifUrl && (
+                    <div
+                        className="flex items-center justify-end gap-3 px-5 py-4 border-t"
+                        style={{ borderColor: 'var(--panel-border)' }}
+                    >
+                        <button
+                            onClick={onClose}
+                            className="cb-btn cb-btn-secondary"
+                        >
+                            Cancelar
+                        </button>
+                        <button
+                            onClick={onDownload}
+                            className="cb-btn cb-btn-secondary flex items-center gap-2"
+                        >
+                            <Download className="h-4 w-4" />
+                            Baixar
+                        </button>
+                        <button
+                            onClick={onAddToDoc}
+                            disabled={gifDescribeLoading}
+                            className="cb-btn cb-btn-primary flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            <Plus className="h-4 w-4" />
+                            {gifDescribeLoading ? 'Gerando legenda...' : 'Adicionar à Doc'}
+                        </button>
+                    </div>
+                )}
+            </div>
+        </div>
+    )
+}

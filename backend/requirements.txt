@@ -15,6 +15,9 @@ Pillow>=10.0.0
 # Optional: export as PDF
 reportlab>=4.0.0
 
+# Optional: extract text from PDF (format-and-export pipeline)
+pypdf>=4.0.0
+
 # Optional: import videos from YouTube (server-side download)
 yt-dlp>=2024.12.23
 

@@ -1,4 +1,5 @@
 import React from 'react'
+import GifStepPreview from './GifStepPreview'
 
 export default function StepCard({ s, idx, updateDescription, generateWithAI, removeStep, aiStepBusyId, darkMode, videoId, aiStatus }) {
   const hasTimestamp = Boolean((s?.timestamp || '').trim())
@@ -7,7 +8,19 @@ export default function StepCard({ s, idx, updateDescription, generateWithAI, re
     <div className={`rounded-md border p-12 cb-panel`} style={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text)' }}>
       <div className="flex flex-col items-start gap-6">
         {s?.url ? (
-          <img src={s.url} alt={`Passo ${idx + 1}`} className="w-full h-96 rounded object-cover" />
+          s.is_gif ? (
+            <div className="w-full h-96 rounded overflow-hidden">
+              <GifStepPreview
+                gifUrl={s.url}
+                thumbnailUrl={s.thumbnailUrl}
+                alt={`Passo ${idx + 1}`}
+                className="w-full h-full"
+                imgClassName="w-full h-96 object-cover rounded"
+              />
+            </div>
+          ) : (
+            <img src={s.url} alt={`Passo ${idx + 1}`} className="w-full h-96 rounded object-cover" />
+          )
         ) : (
           <div className="w-full h-96 rounded border flex items-center justify-center" style={{ borderColor: 'var(--card-border)', color: 'var(--muted-text)' }}>
             Passo sem imagem

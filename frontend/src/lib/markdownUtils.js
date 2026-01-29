@@ -171,16 +171,38 @@ function parseSteps(body) {
             url: ''
         }
 
-        // Parse fields
-        const fieldRegex = /- \*\*(.+?):\*\* (.+)/g
-        let fieldMatch
-        while ((fieldMatch = fieldRegex.exec(content)) !== null) {
-            const fieldName = fieldMatch[1].toLowerCase()
-            const fieldValue = fieldMatch[2].trim()
+        // Parse fields - suporta campos multi-linha
+        // Primeiro, encontrar todas as posições dos marcadores de campo
+        const fieldMarkerRegex = /- \*\*(.+?):\*\* /g
+        const fieldPositions = []
+        let markerMatch
+        while ((markerMatch = fieldMarkerRegex.exec(content)) !== null) {
+            fieldPositions.push({
+                fieldName: markerMatch[1].toLowerCase(),
+                startIndex: markerMatch.index + markerMatch[0].length
+            })
+        }
+
+        // Extrair o valor de cada campo (até o próximo campo ou fim do conteúdo)
+        for (let i = 0; i < fieldPositions.length; i++) {
+            const field = fieldPositions[i]
+            const nextFieldStart = fieldPositions[i + 1]?.startIndex - (fieldPositions[i + 1] ? content.slice(0, fieldPositions[i + 1].startIndex).match(/- \*\*[^*]+:\*\* $/m)?.[0]?.length || 0 : 0)
+
+            // Encontrar onde termina este campo
+            let endIndex = content.length
+            if (i + 1 < fieldPositions.length) {
+                // Encontrar o início da próxima linha que contém o próximo campo
+                const nextMarkerSearch = content.slice(field.startIndex).search(/\n- \*\*/)
+                if (nextMarkerSearch !== -1) {
+                    endIndex = field.startIndex + nextMarkerSearch
+                }
+            }
+
+            const fieldValue = content.slice(field.startIndex, endIndex).trim()
 
             if (fieldValue === '(Não preenchido)') continue
 
-            switch (fieldName) {
+            switch (field.fieldName) {
                 case 'descrição':
                     step.description = fieldValue
                     break

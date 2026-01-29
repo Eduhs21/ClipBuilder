@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { Sparkles, Loader2, Wand2 } from 'lucide-react'
+import GifStepPreview from './GifStepPreview'
 
 export default function Sidebar({
   steps = [],
@@ -34,7 +35,18 @@ export default function Sidebar({
         <div className="mb-6">
           <div className="mb-4 rounded-xl overflow-hidden border" style={{ borderColor: 'var(--card-border)' }}>
             {hasSelectedImage ? (
-              <img src={selected.url} alt="selected" className="w-full h-64 object-cover" />
+              selected.is_gif ? (
+                <GifStepPreview
+                  gifUrl={selected.url}
+                  thumbnailUrl={selected.thumbnailUrl}
+                  isSelected={true}
+                  alt={`Passo ${steps.indexOf(selected) + 1}`}
+                  className="w-full h-64"
+                  imgClassName="w-full h-64 object-cover"
+                />
+              ) : (
+                <img src={selected.url} alt="selected" className="w-full h-64 object-cover" />
+              )
             ) : (
               <div className="w-full h-64 flex items-center justify-center" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--muted-text)' }}>
                 <div className="text-center space-y-2">
@@ -164,7 +176,20 @@ export default function Sidebar({
                   }}
                 >
                   {s?.url ? (
-                    <img src={s.url} alt={`Passo ${idx + 1}`} className="h-16 w-24 rounded-md object-cover flex-shrink-0 border" style={{ borderColor: 'var(--card-border)' }} />
+                    s.is_gif ? (
+                      <div className="h-16 w-24 rounded-md flex-shrink-0 overflow-hidden border" style={{ borderColor: 'var(--card-border)' }}>
+                        <GifStepPreview
+                          gifUrl={s.url}
+                          thumbnailUrl={s.thumbnailUrl}
+                          isSelected={isSelected}
+                          alt={`Passo ${idx + 1}`}
+                          className="h-full w-full"
+                          imgClassName="h-full w-full object-cover"
+                        />
+                      </div>
+                    ) : (
+                      <img src={s.url} alt={`Passo ${idx + 1}`} className="h-16 w-24 rounded-md object-cover flex-shrink-0 border" style={{ borderColor: 'var(--card-border)' }} />
+                    )
                   ) : (
                     <div className="h-16 w-24 rounded-md flex-shrink-0 border grid place-items-center text-xs font-medium" style={{ backgroundColor: 'var(--btn-hover-bg)', borderColor: 'var(--card-border)', color: 'var(--muted-text)' }}>
                       Texto

@@ -679,6 +679,70 @@ def _extract_frames_from_video(
     return frames
 
 
+def _extract_frames_from_gif(gif_bytes: bytes, frame_count: int = 5) -> list[bytes]:
+    """Extract frames from a GIF file using Pillow.
+    
+    Returns up to `frame_count` frames evenly distributed across the GIF,
+    as PNG bytes for sending to Groq Vision.
+    """
+    try:
+        from PIL import Image
+        from PIL import ImageSequence
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="Dependência 'Pillow' não instalada. Execute: pip install Pillow",
+        ) from exc
+
+    try:
+        img = Image.open(io.BytesIO(gif_bytes))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Arquivo GIF inválido ou corrompido: {exc!s}",
+        ) from exc
+
+    if getattr(img, "format", None) and str(img.format).upper() not in ("GIF",):
+        raise HTTPException(
+            status_code=400,
+            detail="O arquivo não é um GIF válido.",
+        )
+
+    # Collect all frames (ImageSequence.Iterator consumes, so we list once)
+    seq_frames: list[Any] = []
+    for frame in ImageSequence.Iterator(img):
+        seq_frames.append(frame.copy())
+    if not seq_frames:
+        seq_frames = [img.copy()]
+
+    n = len(seq_frames)
+    if frame_count <= 1 or n <= 1:
+        indices = [0]
+    else:
+        step = (n - 1) / max(1, frame_count - 1)
+        indices = [min(int(round(i * step)), n - 1) for i in range(frame_count)]
+        indices = sorted(set(indices))[:frame_count]
+
+    out: list[bytes] = []
+    for idx in indices:
+        try:
+            frame_img = seq_frames[idx]
+            buf = io.BytesIO()
+            frame_img.save(buf, format="PNG")
+            data = buf.getvalue()
+            if data:
+                out.append(data)
+        except Exception as exc:
+            logger.warning("Failed to export GIF frame %s as PNG: %s", idx, exc)
+
+    if not out:
+        raise HTTPException(
+            status_code=400,
+            detail="Não foi possível extrair frames do GIF.",
+        )
+    return out
+
+
 def _extract_audio_clip(
     video_path: Path,
     timestamp_seconds: float,
@@ -904,6 +968,53 @@ def _describe_with_groq(
     return _analyze_frames_with_groq(frames, prompt, api_key, model_name)
 
 
+def _describe_gif_with_groq(
+    *,
+    gif_bytes: bytes,
+    api_key: str,
+    model: str | None = None,
+    document_context: str | None = None,
+    document_title: str | None = None,
+) -> str:
+    """Generate a single step description from a GIF using Groq Vision.
+    
+    Extracts frames from the GIF, sends them to Groq with a prompt asking
+    for one imperative step caption, optionally consistent with document_context.
+    """
+    frames = _extract_frames_from_gif(gif_bytes, frame_count=min(5, GROQ_FRAME_COUNT))
+    if not frames:
+        raise HTTPException(status_code=400, detail="Nenhum frame extraído do GIF")
+
+    system_instruction = (
+        f"Você é um especialista em Documentação Técnica de Software. "
+        f"Seu objetivo é criar tutoriais passo a passo claros e diretos. "
+        f"Responda sempre em português do Brasil (pt-BR). Idioma preferido: {AI_LANGUAGE}."
+    )
+    task_instruction = (
+        "Você está vendo uma sequência de imagens extraídas de um GIF animado que mostra uma ação na tela. "
+        "Analise a sequência para entender o que está sendo feito."
+    )
+    formatting_instruction = (
+        "REGRAS DE SAÍDA:\n"
+        "1. Gere UMA ÚNICA frase ou legenda que descreva o passo/ação mostrada no GIF.\n"
+        "2. Use modo imperativo (ex: 'Clique em Salvar', 'Selecione o menu Arquivo').\n"
+        "3. Não use narração (evite 'O usuário clica...').\n"
+        "4. Seja conciso: uma instrução clara para reproduzir aquele passo.\n"
+        "5. Não mencione 'vídeo', 'GIF', 'tela' ou 'o usuário' na resposta.\n"
+        "6. Retorne APENAS o texto da legenda, sem numeração ou prefixo."
+    )
+    parts = [system_instruction, task_instruction, formatting_instruction]
+
+    if document_context and document_context.strip():
+        ctx = f"CONTEXTO DO DOCUMENTO DE REFERÊNCIA (mantenha o estilo e a estrutura):\n{document_context.strip()}"
+        parts.append(ctx)
+    if document_title and document_title.strip():
+        parts.append(f"Título do documento: {document_title.strip()}")
+
+    prompt = "\n\n".join(parts)
+    return _analyze_frames_with_groq(frames, prompt, api_key, model)
+
+
 def _is_groq_model(model_name: str) -> bool:
     """Check if the model name refers to a Groq model."""
     if not model_name:
@@ -961,6 +1072,31 @@ def _parse_steps(steps_raw: str) -> list[StepPayload]:
 
 
 _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+_JPEG_MAGIC = b"\xff\xd8\xff"
+
+
+def _normalize_image_to_png(image_bytes: bytes) -> bytes:
+    """Accept PNG as-is; accept JPEG and convert to PNG. Raise HTTPException for invalid data."""
+    if not image_bytes or len(image_bytes) < 8:
+        raise HTTPException(status_code=400, detail="One or more images are invalid (expected PNG or JPEG)")
+    if image_bytes.startswith(_PNG_MAGIC):
+        return image_bytes
+    if image_bytes.startswith(_JPEG_MAGIC):
+        try:
+            from PIL import Image
+
+            img = Image.open(io.BytesIO(image_bytes))
+            if img.mode in ("RGBA", "P"):
+                img = img.convert("RGB")
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            return buf.getvalue()
+        except Exception as exc:
+            raise HTTPException(
+                status_code=400,
+                detail="One or more images are invalid (could not convert to PNG)",
+            ) from exc
+    raise HTTPException(status_code=400, detail="One or more images are invalid (expected PNG or JPEG)")
 
 
 def _sanitize_image_prefix(prefix: str | None) -> str:
@@ -979,10 +1115,6 @@ def _sanitize_image_prefix(prefix: str | None) -> str:
     return cleaned or "step_"
 
 
-def _validate_png(image_bytes: bytes) -> None:
-    # Frontend captures frames as PNG (canvas.toDataURL('image/png')).
-    if not image_bytes.startswith(_PNG_MAGIC):
-        raise HTTPException(status_code=400, detail="One or more images are invalid (expected PNG)")
 
 
 @app.get("/health")
@@ -1470,8 +1602,7 @@ async def export_documentation(
         if total_bytes > MAX_TOTAL_IMAGE_BYTES:
             raise HTTPException(status_code=413, detail="Export payload too large")
 
-        _validate_png(image_bytes)
-        processed_images.append(image_bytes)
+        processed_images.append(_normalize_image_to_png(image_bytes))
 
     md_lines: list[str] = ["# Tutorial\n"]
 
@@ -1693,3 +1824,238 @@ async def export_documentation(
 
     headers = {"Content-Disposition": 'attachment; filename="clipbuilder_export.zip"'}
     return StreamingResponse(zip_buffer, media_type="application/zip", headers=headers)
+
+
+# ---------------------------------------------------------------------------
+# Document Enhancement with Groq
+# ---------------------------------------------------------------------------
+
+@app.post("/enhance-document")
+async def enhance_document(
+    request: Request,
+    x_groq_api_key: str | None = Header(default=None, alias="X-Groq-Api-Key"),
+):
+    """
+    Transforma passos capturados em documento profissional estruturado.
+    
+    Espera JSON no body:
+    {
+        "title": "Título do Documento",
+        "steps": [
+            {"description": "Passo 1", "timestamp": "00:01:30", "has_image": true},
+            {"description": "Passo 2", "timestamp": "00:02:15", "has_image": false}
+        ],
+        "images_b64": ["base64_da_imagem1", "base64_da_imagem2"]  // opcional
+    }
+    
+    Retorna:
+    {
+        "markdown": "# Documento estruturado em Markdown..."
+    }
+    """
+    from enhance import enhance_document_with_groq
+    
+    # Get API key
+    api_key = _get_groq_api_key(x_groq_api_key)
+    
+    # Parse request body
+    try:
+        body = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"JSON inválido: {exc}") from exc
+    
+    title = (body.get("title") or "Documento Sem Título").strip()
+    steps = body.get("steps", [])
+    images_b64 = body.get("images_b64", [])
+    
+    if not isinstance(steps, list):
+        raise HTTPException(status_code=400, detail="Campo 'steps' deve ser uma lista")
+    
+    if len(steps) == 0:
+        raise HTTPException(status_code=400, detail="Pelo menos um passo é necessário")
+    
+    # Validate steps
+    validated_steps = []
+    for i, step in enumerate(steps):
+        if isinstance(step, str):
+            validated_steps.append({"description": step, "timestamp": "", "has_image": False})
+        elif isinstance(step, dict):
+            validated_steps.append({
+                "description": step.get("description", ""),
+                "timestamp": step.get("timestamp", ""),
+                "has_image": step.get("has_image", False),
+            })
+        else:
+            raise HTTPException(status_code=400, detail=f"Passo {i+1} inválido")
+    
+    # Call enhancement function
+    try:
+        enhanced_markdown = enhance_document_with_groq(
+            title=title,
+            steps=validated_steps,
+            api_key=api_key,
+            images_b64=images_b64 if images_b64 else None,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("Erro ao gerar documento com Groq: %s", exc, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao gerar documento: {str(exc)[:200]}"
+        ) from exc
+    
+    return {"markdown": enhanced_markdown}
+
+
+# ---------------------------------------------------------------------------
+# Describe GIF with Groq (generate step caption from GIF frames)
+# ---------------------------------------------------------------------------
+
+MAX_GIF_BYTES = 20 * 1024 * 1024  # 20 MB
+
+@app.post("/describe-gif")
+async def describe_gif(
+    file: UploadFile = File(...),
+    document_context: str | None = Form(default=None),
+    document_title: str | None = Form(default=None),
+    model: str | None = Form(default=None),
+    x_groq_api_key: str | None = Header(default=None, alias="X-Groq-Api-Key"),
+):
+    """
+    Analisa um GIF e devolve uma legenda/instrução de passo (Passo X) gerada pela IA Groq.
+    
+    Multipart: file (GIF obrigatório), document_context (opcional), document_title (opcional).
+    Header: X-Groq-Api-Key (ou GROQ_API_KEY no .env).
+    Resposta: { "description": "..." }
+    """
+    if not file.filename or not file.filename.lower().endswith((".gif",)):
+        raise HTTPException(
+            status_code=400,
+            detail="Envie um arquivo GIF (extensão .gif).",
+        )
+
+    gif_bytes = await file.read()
+    if len(gif_bytes) > MAX_GIF_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"GIF muito grande. Máximo: {MAX_GIF_BYTES // (1024*1024)} MB.",
+        )
+    if len(gif_bytes) < 100:
+        raise HTTPException(status_code=400, detail="Arquivo GIF inválido ou vazio.")
+
+    api_key = _get_groq_api_key(x_groq_api_key)
+
+    def work() -> str:
+        return _describe_gif_with_groq(
+            gif_bytes=gif_bytes,
+            api_key=api_key,
+            model=model or DEFAULT_GROQ_VISION_MODEL,
+            document_context=document_context,
+            document_title=document_title,
+        )
+
+    try:
+        description = await anyio.to_thread.run_sync(work)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("describe-gif failed: %s", exc, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Falha ao analisar GIF com Groq: {str(exc)[:200]}",
+        ) from exc
+
+    return {"description": (description or "").strip() or "GIF animado"}
+
+
+# ---------------------------------------------------------------------------
+# Format document like template (Groq) and export as .docx or .pdf
+# ---------------------------------------------------------------------------
+
+@app.post("/format-and-export")
+async def format_and_export(
+    file: UploadFile | None = File(default=None),
+    markdown: str | None = Form(default=None),
+    output_format: str = Form(default="docx"),
+    x_groq_api_key: str | None = Header(default=None, alias="X-Groq-Api-Key"),
+):
+    """
+    Lê documento (upload .md/.docx/.pdf ou texto markdown), formata via Groq
+    segundo o template passo a passo e devolve ficheiro .docx ou .pdf.
+
+    Form: file (opcional), markdown (opcional), output_format (docx | pdf).
+    Pelo menos um de file ou markdown é obrigatório.
+    """
+    from document_loader import extract_text_from_document
+    from enhance import format_document_like_template
+    from export_from_markdown import markdown_to_docx, markdown_to_pdf
+
+    fmt = (output_format or "docx").strip().lower()
+    if fmt not in ("docx", "pdf"):
+        raise HTTPException(
+            status_code=400,
+            detail="output_format deve ser 'docx' ou 'pdf'.",
+        )
+
+    # Extrair texto (ficheiro ou markdown)
+    try:
+        raw_text = await extract_text_from_document(file=file, markdown_text=markdown)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    if not raw_text or not raw_text.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="O documento está vazio ou não foi possível extrair texto.",
+        )
+
+    # Formatar com Groq (template passo a passo)
+    api_key = _get_groq_api_key(x_groq_api_key)
+    try:
+        formatted_md = format_document_like_template(
+            raw_text=raw_text,
+            api_key=api_key,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("Erro ao formatar documento com Groq: %s", exc, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao formatar documento: {str(exc)[:200]}",
+        ) from exc
+
+    if not formatted_md or not formatted_md.strip():
+        raise HTTPException(
+            status_code=500,
+            detail="Groq devolveu resposta vazia.",
+        )
+
+    # Exportar para docx ou pdf
+    try:
+        if fmt == "docx":
+            out_bytes = markdown_to_docx(formatted_md)
+            filename = "manual.docx"
+            media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        else:
+            out_bytes = markdown_to_pdf(formatted_md)
+            filename = "manual.pdf"
+            media_type = "application/pdf"
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("Erro ao exportar documento: %s", exc, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao exportar: {str(exc)[:200]}",
+        ) from exc
+
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    return StreamingResponse(
+        io.BytesIO(out_bytes),
+        media_type=media_type,
+        headers=headers,
+    )

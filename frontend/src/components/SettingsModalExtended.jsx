@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
-import { FileText, Upload, Download } from 'lucide-react'
+import { FileText, Upload, Download, Wand2 } from 'lucide-react'
 
-export default function SettingsModalExtended({ open, onClose, aiContext, setAiContext, savedPrompt, setSavedPrompt, includeTimestamp, setIncludeTimestamp, geminiModel, setGeminiModel, outputFormat, setOutputFormat, imageNamePrefix, setImageNamePrefix, aiFillEnabled, setAiFillEnabled, onExportMarkdown, onImportMarkdown, stepsCount }) {
+export default function SettingsModalExtended({ open, onClose, aiContext, setAiContext, savedPrompt, setSavedPrompt, includeTimestamp, setIncludeTimestamp, geminiModel, setGeminiModel, outputFormat, setOutputFormat, imageNamePrefix, setImageNamePrefix, aiFillEnabled, setAiFillEnabled, onExportMarkdown, onImportMarkdown, onEnhanceDocument, stepsCount, enhanceLoading }) {
   const [localPrompt, setLocalPrompt] = useState(aiContext || '')
   const [localFormat, setLocalFormat] = useState(outputFormat || 'markdown')
   const [localImagePrefix, setLocalImagePrefix] = useState(imageNamePrefix || 'step_')
@@ -198,6 +198,25 @@ export default function SettingsModalExtended({ open, onClose, aiContext, setAiC
                 Importar .md
               </button>
             </div>
+          </div>
+
+          {/* Seção de Documento Profissional com IA */}
+          <div className="p-4 rounded-lg border mt-4" style={{ backgroundColor: 'var(--accent-bg)', borderColor: 'var(--accent)' }}>
+            <div className="text-sm font-medium mb-2" style={{ color: 'var(--text)' }}>🪄 Documento Profissional</div>
+            <div className="text-xs mb-3" style={{ color: 'var(--muted-text)' }}>
+              Use a IA (Groq) para transformar seus passos em um documento técnico estruturado com seções, objetivos, procedimentos, checklists e troubleshooting.
+            </div>
+            <button
+              onClick={() => {
+                onClose()
+                onEnhanceDocument?.()
+              }}
+              disabled={!stepsCount || stepsCount === 0 || enhanceLoading}
+              className="cb-btn cb-btn-primary w-full h-11 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Wand2 className="h-4 w-4" />
+              {enhanceLoading ? 'Gerando documento...' : 'Gerar Documento Profissional'}
+            </button>
           </div>
 
           <div className="cb-modal-footer">
