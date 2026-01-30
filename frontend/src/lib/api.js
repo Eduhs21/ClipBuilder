@@ -74,13 +74,18 @@ try {
  * Converte markdown em .docx e dispara o download no browser.
  * @param {string} markdown - Conteúdo em markdown
  * @param {string} [filename] - Nome do ficheiro (ex: "documento_profissional.docx")
+ * @param {boolean} [professional=true] - Se true, gera documento com formatação profissional
  */
-export async function downloadMarkdownAsDocx(markdown, filename = 'documento_profissional.docx') {
+export async function downloadMarkdownAsDocx(markdown, filename = 'documento_profissional.docx', professional = true) {
   const safeName = (filename || 'documento_profissional.docx')
     .replace(/[^a-zA-Z0-9._-]/g, '_')
     .slice(0, 80)
   const finalName = safeName.endsWith('.docx') ? safeName : `${safeName}.docx`
-  const response = await api.post('/markdown-to-docx', { markdown, title: finalName.replace('.docx', '') }, { responseType: 'blob' })
+  const response = await api.post('/markdown-to-docx', { 
+    markdown, 
+    title: finalName.replace('.docx', ''),
+    professional
+  }, { responseType: 'blob' })
   const blob = response.data
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')

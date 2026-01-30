@@ -11,7 +11,7 @@ import ImportMarkdownModal from './components/ImportMarkdownModal'
 import EnhancedDocPreview from './components/EnhancedDocPreview'
 import GifPreviewModal from './components/GifPreviewModal'
 import GIF from 'gif.js'
-import { Play, FileVideo, Wand2, Settings, Download, Upload, FileText, Video } from 'lucide-react'
+import { Play, FileVideo, Wand2, Settings, Download, Upload, FileText, Video, Loader2 } from 'lucide-react'
 
 const LS = {
   geminiModel: 'CLIPBUILDER_GEMINI_MODEL',
@@ -169,6 +169,8 @@ export default function App() {
   const [gifPreviewOpen, setGifPreviewOpen] = useState(false)
   const [isGeneratingGif, setIsGeneratingGif] = useState(false)
   const [gifDescribeLoading, setGifDescribeLoading] = useState(false)
+  const [isGeneratingDoc, setIsGeneratingDoc] = useState(false)
+  const [generationStage, setGenerationStage] = useState('') // 'analyzing' | 'generating' | 'downloading'
 
   const totalImageBytes = useMemo(() => {
     return steps.reduce((sum, s) => sum + (s.blob?.size ?? 0), 0)
@@ -1085,6 +1087,84 @@ export default function App() {
     setIsGeneratingGif(false)
   }
 
+  async function handleGenerateDocumentation() {
+    if (!gifBlob) return
+    setIsGeneratingDoc(true)
+    setGenerationStage('analyzing')
+    setAiError('')
+
+    try {
+      // Stage 1: Describe GIF (Extract context)
+      // Send as Multipart form data - efficient for large files
+      const form = new FormData()
+      form.append('file', new File([gifBlob], 'clipbuilder.gif', { type: 'image/gif' }))
+
+      // Add minimal context
+      if (documentTitle) form.append('document_title', documentTitle)
+
+      const descRes = await api.post('/describe-gif', form, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      })
+
+      const description = descRes?.data?.description || "Procedimento demonstrado no GIF (análise automática indisponível)"
+
+      // Generate Thumbnail for DocContext
+      let thumbBase64 = null
+      try {
+        const img = new Image()
+        img.src = URL.createObjectURL(gifBlob)
+        await new Promise((resolve) => img.onload = resolve)
+
+        const canvas = document.createElement('canvas')
+        const scale = Math.min(1, 800 / img.naturalWidth)
+        canvas.width = img.naturalWidth * scale
+        canvas.height = img.naturalHeight * scale
+        const ctx = canvas.getContext('2d')
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+
+        thumbBase64 = canvas.toDataURL('image/jpeg', 0.8).split(',')[1]
+      } catch (err) {
+        console.warn('Thumbnail generation failed', err)
+      }
+
+      // Stage 2: Generate Structured Document (with Text + Thumbnail)
+      setGenerationStage('generating')
+
+      const res = await api.post('/generate-documentation', {
+        title: documentTitle || "Procedimento",
+        steps: [{
+          description: description,
+          has_image: !!thumbBase64
+        }],
+        images: thumbBase64 ? [thumbBase64] : [],
+        output_format: "docx"
+      }, {
+        responseType: 'blob'
+      })
+
+      setGenerationStage('downloading')
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+      downloadBlob(res.data, `procedimento_${timestamp}.docx`)
+      closeGifPreview()
+
+    } catch (e) {
+      console.error(e)
+      let msg = e.message
+      if (e.response?.data instanceof Blob) {
+        try {
+          const text = await e.response.data.text()
+          msg = JSON.parse(text).detail || msg
+        } catch { }
+      } else if (e.response?.data?.detail) {
+        msg = e.response.data.detail
+      }
+      setAiError("Falha ao gerar documentação: " + msg)
+    } finally {
+      setIsGeneratingDoc(false)
+      setGenerationStage('')
+    }
+  }
+
   const editingStep = steps.find((s) => s.id === editingStepId) || null
 
   return (
@@ -1127,7 +1207,7 @@ export default function App() {
                 {/* Criar: adicionar ao tutorial */}
                 <div>
                   <div className="text-xs font-medium mb-2" style={{ color: 'var(--muted-text)' }}>Adicionar ao tutorial</div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 gap-3">
                     <button
                       onClick={captureFrame}
                       disabled={!videoUrl || capturing}
@@ -1135,30 +1215,8 @@ export default function App() {
                       title="Pause no vídeo e capture (tecla S)"
                     >
                       <Play className="h-5 w-5" />
-                      {capturing ? 'Capturando...' : 'Capturar'}
+                      {capturing ? 'Capturando...' : 'Capturar Frame'}
                     </button>
-                    {isRecordingGif ? (
-                      <button
-                        type="button"
-                        onClick={stopGifRecording}
-                        className="cb-btn w-full h-12 text-base font-semibold animate-pulse"
-                        style={{ backgroundColor: '#ef4444', color: 'white', borderColor: '#ef4444' }}
-                      >
-                        <span className="inline-block w-2 h-2 rounded-full bg-white"></span>
-                        Parar GIF
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={startGifRecording}
-                        disabled={!videoUrl || capturing}
-                        className="cb-btn w-full h-12 text-base font-semibold"
-                        title="Gravar parte do vídeo como GIF animado para o tutorial."
-                      >
-                        <Video className="h-5 w-5" />
-                        Gravar GIF
-                      </button>
-                    )}
                   </div>
                 </div>
 
@@ -1190,10 +1248,14 @@ export default function App() {
                         onClick={enhanceDocument}
                         disabled={enhanceLoading || steps.length === 0}
                         className="cb-btn w-full h-11 disabled:opacity-50 disabled:cursor-not-allowed"
-                        title="Transformar passos em documento técnico estruturado"
+                        title="Transformar passos em documento técnico estruturado (IA reprocessa todos os passos)"
                       >
-                        <Wand2 className="h-4 w-4" />
-                        {enhanceLoading ? 'Gerando...' : 'Doc Pro'}
+                        {enhanceLoading ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Wand2 className="h-4 w-4" />
+                        )}
+                        {enhanceLoading ? 'Gerando Doc Pro...' : 'Doc Pro'}
                       </button>
                     </div>
                   </div>
@@ -1295,6 +1357,9 @@ export default function App() {
           isGenerating={isGeneratingGif}
           progress={gifProgress}
           gifDescribeLoading={gifDescribeLoading}
+          onGenerateDoc={handleGenerateDocumentation}
+          isGeneratingDoc={isGeneratingDoc}
+          generationStage={generationStage}
         />
       </main>
     </div>

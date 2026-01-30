@@ -987,21 +987,30 @@ def _describe_gif_with_groq(
 
     system_instruction = (
         f"Você é um especialista em Documentação Técnica de Software. "
-        f"Seu objetivo é criar tutoriais passo a passo claros e diretos. "
+        f"Seu objetivo é criar tutoriais passo a passo claros, diretos e CONTEXTUALIZADOS. "
         f"Responda sempre em português do Brasil (pt-BR). Idioma preferido: {AI_LANGUAGE}."
     )
     task_instruction = (
-        "Você está vendo uma sequência de imagens extraídas de um GIF animado que mostra uma ação na tela. "
-        "Analise a sequência para entender o que está sendo feito."
+        "Você está vendo uma sequência de imagens extraídas de um GIF animado que mostra uma ação sendo realizada em um software. "
+        "Analise CUIDADOSAMENTE a sequência para entender:\n"
+        "1. Em qual tela/janela/modal o usuário está (identifique pelo título da janela, abas, cabeçalhos visíveis).\n"
+        "2. Quais elementos visuais estão presentes (botões, campos de texto, menus, abas, tabelas, checkboxes).\n"
+        "3. Qual é a ação específica sendo executada (clique, preenchimento, seleção, navegação).\n"
+        "4. Qual é o objetivo final dessa ação."
     )
     formatting_instruction = (
         "REGRAS DE SAÍDA:\n"
-        "1. Gere UMA ÚNICA frase ou legenda que descreva o passo/ação mostrada no GIF.\n"
-        "2. Use modo imperativo (ex: 'Clique em Salvar', 'Selecione o menu Arquivo').\n"
-        "3. Não use narração (evite 'O usuário clica...').\n"
-        "4. Seja conciso: uma instrução clara para reproduzir aquele passo.\n"
-        "5. Não mencione 'vídeo', 'GIF', 'tela' ou 'o usuário' na resposta.\n"
-        "6. Retorne APENAS o texto da legenda, sem numeração ou prefixo."
+        "1. Gere UMA instrução completa e contextualizada que descreva o passo/ação mostrada.\n"
+        "2. INCLUA o contexto visual (nome da tela, seção, aba) no início da instrução.\n"
+        "   - Exemplo RUIM: 'Clique em Salvar.'\n"
+        "   - Exemplo BOM: 'Na aba \"Informações Gerais\" do cadastro de produto, clique no botão \"Salvar\" para confirmar as alterações.'\n"
+        "   - Exemplo BOM: 'No campo \"NCM\", digite o código NCM do produto e pressione Enter para buscar.'\n"
+        "   - Exemplo BOM: 'Acesse o menu \"Cadastros\" e selecione a opção \"Produtos\" para abrir a lista de produtos.'\n"
+        "3. Use modo imperativo (ex: 'Clique em', 'Selecione', 'Preencha o campo', 'Acesse').\n"
+        "4. Não use narração (evite 'O usuário clica...').\n"
+        "5. Se houver textos visíveis em botões/campos/abas, mencione-os entre aspas.\n"
+        "6. Não mencione 'vídeo', 'GIF' ou 'imagem' na resposta.\n"
+        "7. Retorne APENAS o texto da instrução, sem numeração, prefixo ou explicações adicionais."
     )
     parts = [system_instruction, task_instruction, formatting_instruction]
 
@@ -1833,10 +1842,10 @@ async def export_documentation(
 @app.post("/enhance-document")
 async def enhance_document(
     request: Request,
-    x_groq_api_key: str | None = Header(default=None, alias="X-Groq-Api-Key"),
+    x_google_api_key: str | None = Header(default=None, alias="X-Google-Api-Key"),
 ):
     """
-    Transforma passos capturados em documento profissional estruturado.
+    Transforma passos capturados em documento profissional estruturado usando Gemini.
     
     Espera JSON no body:
     {
@@ -1844,19 +1853,24 @@ async def enhance_document(
         "steps": [
             {"description": "Passo 1", "timestamp": "00:01:30", "has_image": true},
             {"description": "Passo 2", "timestamp": "00:02:15", "has_image": false}
-        ],
-        "images_b64": ["base64_da_imagem1", "base64_da_imagem2"]  // opcional
+        ]
     }
     
     Retorna:
     {
         "markdown": "# Documento estruturado em Markdown..."
     }
-    """
-    from enhance import enhance_document_with_groq
     
-    # Get API key
-    api_key = _get_groq_api_key(x_groq_api_key)
+    O Markdown gerado segue o formato Doc Pro:
+    - Cada passo com Objetivo e Procedimento
+    - Callouts (> [!NOTE], > [!TIP], > [!WARNING])
+    - Checklist de Verificação Final
+    - Tabela de Problemas Comuns e Soluções
+    """
+    from enhance import enhance_document_with_gemini
+    
+    # Get API key (Gemini)
+    api_key = _get_api_key(x_google_api_key)
     
     # Parse request body
     try:
@@ -1866,7 +1880,6 @@ async def enhance_document(
     
     title = (body.get("title") or "Documento Sem Título").strip()
     steps = body.get("steps", [])
-    images_b64 = body.get("images_b64", [])
     
     if not isinstance(steps, list):
         raise HTTPException(status_code=400, detail="Campo 'steps' deve ser uma lista")
@@ -1888,24 +1901,25 @@ async def enhance_document(
         else:
             raise HTTPException(status_code=400, detail=f"Passo {i+1} inválido")
     
-    # Call enhancement function
+    # Call enhancement function (Gemini)
     try:
-        enhanced_markdown = enhance_document_with_groq(
+        enhanced_markdown = enhance_document_with_gemini(
             title=title,
             steps=validated_steps,
             api_key=api_key,
-            images_b64=images_b64 if images_b64 else None,
+            model=DEFAULT_GEMINI_MODEL,
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except Exception as exc:
-        logger.error("Erro ao gerar documento com Groq: %s", exc, exc_info=True)
+        logger.error("Erro ao gerar documento com Gemini: %s", exc, exc_info=True)
         raise HTTPException(
             status_code=500,
             detail=f"Erro ao gerar documento: {str(exc)[:200]}"
         ) from exc
     
     return {"markdown": enhanced_markdown}
+
 
 
 # ---------------------------------------------------------------------------
@@ -1916,10 +1930,16 @@ async def enhance_document(
 async def markdown_to_docx_endpoint(request: Request):
     """
     Converte markdown em ficheiro .docx.
-    Body JSON: { "markdown": "...", "title": "opcional" }.
+    Body JSON: { "markdown": "...", "title": "opcional", "professional": true/false }.
+    
+    Se professional=true (padrão), gera documento com formatação profissional:
+    - Capa, Sumário, Títulos coloridos, Callouts, Rodapé com numeração.
+    
+    Se professional=false, gera documento simples.
+    
     Devolve o ficheiro .docx para download.
     """
-    from export_from_markdown import markdown_to_docx
+    from export_from_markdown import markdown_to_docx, markdown_to_docx_pro
 
     try:
         body = await request.json()
@@ -1936,9 +1956,17 @@ async def markdown_to_docx_endpoint(request: Request):
     title = (body.get("title") or "documento_profissional").strip()
     safe_title = "".join(c if c.isalnum() or c in "._- " else "_" for c in title)[:80] or "documento_profissional"
     filename = f"{safe_title}.docx"
+    
+    # Default to professional mode (True)
+    professional = body.get("professional", True)
+    if isinstance(professional, str):
+        professional = professional.lower() in ("true", "1", "yes", "sim")
 
     try:
-        out_bytes = markdown_to_docx(markdown)
+        if professional:
+            out_bytes = markdown_to_docx_pro(markdown, title=safe_title)
+        else:
+            out_bytes = markdown_to_docx(markdown)
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except Exception as exc:
@@ -2105,5 +2133,192 @@ async def format_and_export(
     return StreamingResponse(
         io.BytesIO(out_bytes),
         media_type=media_type,
+        headers=headers,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Generate Structured Documentation (Groq JSON output)
+# ---------------------------------------------------------------------------
+
+@app.post("/generate-documentation")
+async def generate_documentation(
+    request: Request,
+    x_groq_api_key: str | None = Header(default=None, alias="X-Groq-Api-Key"),
+):
+    """
+    Gera documentação técnica estruturada a partir de passos capturados.
+    
+    Body JSON:
+    {
+        "title": "Título do Documento",
+        "steps": [{"description": "...", "has_image": true}],
+        "output_format": "json" | "markdown" | "docx"
+    }
+    
+    Retorna:
+    - JSON: Objeto estruturado com visao_geral, passos, avisos, checklist, troubleshooting
+    - Markdown: Documento formatado em Markdown
+    - DOCX: Arquivo .docx para download
+    """
+    from enhance import generate_structured_documentation
+    from export_from_markdown import structured_json_to_docx
+
+    try:
+        body = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"JSON inválido: {exc}") from exc
+
+    title = (body.get("title") or "Documentação").strip()
+    if not title:
+        title = "Documentação"
+
+    steps_raw = body.get("steps", [])
+    if not steps_raw or not isinstance(steps_raw, list):
+        raise HTTPException(status_code=400, detail="Campo 'steps' é obrigatório e deve ser uma lista.")
+
+    # Validate and normalize steps
+    validated_steps = []
+    for i, step in enumerate(steps_raw):
+        if isinstance(step, str):
+            validated_steps.append({"description": step, "has_image": True})
+        elif isinstance(step, dict):
+            desc = step.get("description", "")
+            if not isinstance(desc, str):
+                raise HTTPException(status_code=400, detail=f"Passo {i+1}: 'description' deve ser string.")
+            validated_steps.append({
+                "description": desc,
+                "has_image": step.get("has_image", True),
+                "timestamp": step.get("timestamp", ""),
+            })
+        else:
+            raise HTTPException(status_code=400, detail=f"Passo {i+1} inválido.")
+
+    # Extract images (base64) if provided
+    images_raw = body.get("images")
+    if images_raw and not isinstance(images_raw, list):
+         # If single string, wrap in list? No, explicit list required.
+         logger.warning("Campo 'images' recebido mas não é lista.")
+         images_raw = None
+
+    output_format = (body.get("output_format") or "json").strip().lower()
+    if output_format not in ("json", "markdown", "docx"):
+        raise HTTPException(status_code=400, detail="output_format deve ser 'json', 'markdown' ou 'docx'.")
+
+    # Get API key
+    api_key = _get_groq_api_key(x_groq_api_key)
+
+    # Generate structured documentation
+    def work() -> dict:
+        return generate_structured_documentation(
+            title=title,
+            steps=validated_steps,
+            api_key=api_key,
+            model=DEFAULT_GROQ_VISION_MODEL,
+            images_b64=images_raw,
+        )
+
+    try:
+        structured_doc = await anyio.to_thread.run_sync(work)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("Erro ao gerar documentação estruturada: %s", exc, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao gerar documentação: {str(exc)[:200]}"
+        ) from exc
+
+    # Return based on output_format
+    if output_format == "json":
+        return {"documentation": structured_doc}
+
+    if output_format == "markdown":
+        # Convert JSON to Markdown
+        md_lines = []
+        md_lines.append(f"# {title}")
+        md_lines.append("")
+        md_lines.append("## Visão Geral")
+        md_lines.append(structured_doc.get("visao_geral", ""))
+        md_lines.append("")
+        md_lines.append("---")
+        md_lines.append("")
+        
+        for passo in structured_doc.get("passos", []):
+            numero = passo.get("numero", 0)
+            titulo = passo.get("titulo", f"Passo {numero}")
+            md_lines.append(f"## Passo {numero}: {titulo}")
+            md_lines.append("")
+            md_lines.append("### Objetivo")
+            md_lines.append(passo.get("objetivo", ""))
+            md_lines.append("")
+            md_lines.append("### Procedimento")
+            for proc in passo.get("procedimento", []):
+                md_lines.append(f"1. {proc}")
+            md_lines.append("")
+            if passo.get("imagem"):
+                md_lines.append(f"![Passo {numero}]({passo['imagem']})")
+                md_lines.append("")
+            md_lines.append("---")
+            md_lines.append("")
+        
+        # Avisos
+        avisos = structured_doc.get("avisos", [])
+        if avisos:
+            for aviso in avisos:
+                tipo = aviso.get("tipo", "NOTE").upper()
+                texto = aviso.get("texto", "")
+                md_lines.append(f"> [!{tipo}]")
+                md_lines.append(f"> {texto}")
+                md_lines.append("")
+        
+        # Checklist
+        checklist = structured_doc.get("checklist", [])
+        if checklist:
+            md_lines.append("## Checklist de Verificação Final")
+            md_lines.append("")
+            md_lines.append("Antes de considerar o procedimento concluído, confirme:")
+            md_lines.append("")
+            for item in checklist:
+                md_lines.append(f"- [ ] {item}")
+            md_lines.append("")
+            md_lines.append("---")
+            md_lines.append("")
+        
+        # Troubleshooting
+        troubleshooting = structured_doc.get("troubleshooting", [])
+        if troubleshooting:
+            md_lines.append("## Problemas Comuns e Soluções")
+            md_lines.append("")
+            md_lines.append("| Problema | Causa | Solução |")
+            md_lines.append("|----------|-------|---------|")
+            for item in troubleshooting:
+                problema = item.get("problema", "")
+                causa = item.get("causa", "")
+                solucao = item.get("solucao", "")
+                md_lines.append(f"| {problema} | {causa} | {solucao} |")
+            md_lines.append("")
+        
+        return {"markdown": "\n".join(md_lines)}
+
+    # DOCX output
+    try:
+        out_bytes = structured_json_to_docx(structured_doc, title=title)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("Erro ao converter para DOCX: %s", exc, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao exportar DOCX: {str(exc)[:200]}"
+        ) from exc
+
+    safe_title = "".join(c if c.isalnum() or c in "._- " else "_" for c in title)[:80] or "documentacao"
+    filename = f"{safe_title}.docx"
+    
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    return StreamingResponse(
+        io.BytesIO(out_bytes),
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers=headers,
     )

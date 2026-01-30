@@ -147,8 +147,8 @@ export default function EnhancedDocPreview({ open, onClose, markdown, onMarkdown
               <div
                 className="enhanced-doc-word-layout p-6 overflow-auto"
                 style={{
-                  backgroundColor: '#fff',
-                  color: '#1a1a1a',
+                  backgroundColor: 'var(--card-bg)',
+                  color: 'var(--text)',
                   minHeight: '280px',
                 }}
               >
@@ -158,7 +158,7 @@ export default function EnhancedDocPreview({ open, onClose, markdown, onMarkdown
                     dangerouslySetInnerHTML={{ __html: wordHtml }}
                   />
                 ) : (
-                  <p className="text-gray-500">Nenhum conteúdo gerado.</p>
+                  <p style={{ color: 'var(--muted-text)' }}>Nenhum conteúdo gerado.</p>
                 )}
               </div>
             )}

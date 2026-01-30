@@ -1,5 +1,5 @@
 import React from 'react'
-import { Video } from 'lucide-react'
+import { Video, Square } from 'lucide-react'
 
 export default function VideoArea({
   videoUrl,
@@ -51,11 +51,36 @@ export default function VideoArea({
             <video key={videoUrl} ref={videoRef} src={videoUrl} controls crossOrigin="anonymous" playsInline preload="auto" className="h-full w-full" />
             <canvas ref={canvasRef} style={{ display: 'none' }} />
 
-            {/* Indicador de gravação de GIF */}
+            {/* Indicador de gravação de GIF movido para fora ou mantido aqui se for apenas visual? 
+                O usuário pediu "Reloque o botão 'Posicionar' para uma área mais intuitiva próxima ao player de vídeo". 
+                Vou verificar onde o botão está atualmente.
+            */}
+            {/* Controles de Gravação de GIF (Overlay) */}
+            <div className="absolute top-4 right-4 flex gap-2 z-20">
+              {isRecordingGif ? (
+                <button
+                  onClick={onStopGifRecording}
+                  className="flex items-center gap-2 px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg shadow-lg font-medium animate-pulse transition-colors"
+                >
+                  <Square className="h-4 w-4" fill="currentColor" />
+                  Parar
+                </button>
+              ) : (
+                <button
+                  onClick={onStartGifRecording}
+                  className="flex items-center gap-2 px-4 py-2 bg-black/60 hover:bg-black/80 text-white backdrop-blur-md rounded-lg shadow-lg font-medium transition-colors border border-white/10"
+                >
+                  <div className="w-3 h-3 rounded-full bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]" />
+                  Gravar GIF
+                </button>
+              )}
+            </div>
+
+            {/* Indicador de gravação de GIF (mantido para redundância visual clara) */}
             {isRecordingGif && (
-              <div className="absolute top-4 left-4 flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-500 text-white text-sm font-medium shadow-lg">
+              <div className="absolute top-4 left-4 flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-500 text-white text-sm font-medium shadow-lg z-10">
                 <span className="inline-block w-2 h-2 rounded-full bg-white animate-pulse"></span>
-                Gravando GIF...
+                Gravando...
               </div>
             )}
 
