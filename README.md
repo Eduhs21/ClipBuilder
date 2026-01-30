@@ -27,7 +27,7 @@ ClipBuilder transforma vídeos em tutoriais passo‑a‑passo e exporta em **HTM
 
 **Frontend**
 - React + Vite
-- TailwindCSS (com variáveis CSS para tema claro/escuro)
+- TailwindCSS (com suporte a **Modo Escuro** 🌙 e Claro)
 - Nginx (em produção via Docker) com proxy `/api` → backend
 
 **Backend**
