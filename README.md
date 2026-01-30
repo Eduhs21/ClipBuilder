@@ -11,7 +11,10 @@ ClipBuilder transforma vídeos em tutoriais passo‑a‑passo e exporta em **HTM
 	- pedir para a IA (**Gemini** ou **Groq/Llama 4**) gerar a descrição com base no **timestamp**
 	- editar a imagem do passo (corte/anotações)
 4) **Gravar GIF**: você pode gravar GIFs animados diretamente do vídeo e adicioná-los como passos. A IA analisa o GIF e gera automaticamente a descrição do passo.
-5) **Gerar Documento Profissional**: nas configurações, clique em "🪄 Gerar Documento Profissional" para que o Groq transforme seus passos em um documento estruturado com visão geral, seções numeradas, checklists e troubleshooting.
+5) **Gerar Documento Profissional**: clique em "Doc Pro" na área principal para que a IA (Groq) transforme seus passos em um documento estruturado com visão geral, seções numeradas, checklists e troubleshooting. No preview você pode:
+	- **Editar** o markdown gerado diretamente
+	- Alternar entre visualização **Markdown** e **Layout Word** (renderizado)
+	- **Baixar como Word (.docx)** com um clique
 6) No fim, você exporta o tutorial em:
 	- **Markdown** (inclui opção de ZIP com imagens)
 	- **HTML**

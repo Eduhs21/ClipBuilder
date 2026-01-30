@@ -1,5 +1,5 @@
-import React, { useState } from 'react'
-import { Sparkles, Loader2, Wand2 } from 'lucide-react'
+import React, { useState, useEffect } from 'react'
+import { Sparkles, Loader2, Wand2, ListOrdered, ImageOff } from 'lucide-react'
 import GifStepPreview from './GifStepPreview'
 
 export default function Sidebar({
@@ -17,24 +17,35 @@ export default function Sidebar({
   onEditImage
 }) {
   const [draggingId, setDraggingId] = useState(null)
+  const [previewLoadError, setPreviewLoadError] = useState(false)
 
   const selected = steps.find((s) => s.id === selectedStepId) || steps[0] || null
+
+  useEffect(() => {
+    setPreviewLoadError(false)
+  }, [selected?.id])
   const canGenerate =
     !!selected &&
     !!videoId &&
     aiStatus === 'ready' &&
     aiStepBusyId !== selected?.id &&
-    typeof selected?.seconds === 'number' &&
-    !!selected?.timestamp
+    // Permitir IA para GIFs (que têm imagem) ou frames normais com timestamp
+    ((!!selected?.is_gif && !!selected?.url) || (typeof selected?.seconds === 'number' && !!selected?.timestamp))
 
   const hasSelectedImage = !!selected?.url
 
   return (
     <aside className="cb-panel flex flex-col">
+      <div className="flex items-center gap-2 mb-4">
+        <ListOrdered className="h-5 w-5 flex-shrink-0" style={{ color: 'var(--text)' }} />
+        <h2 className="text-lg font-semibold" style={{ color: 'var(--text)' }}>Seus passos</h2>
+      </div>
+
       {selected ? (
-        <div className="mb-6">
-          <div className="mb-4 rounded-xl overflow-hidden border" style={{ borderColor: 'var(--card-border)' }}>
-            {hasSelectedImage ? (
+        <div className="mb-6 transition-all duration-200">
+          <div className="text-xs font-medium mb-2" style={{ color: 'var(--muted-text)' }}>Passo em edição</div>
+          <div className="mb-4 rounded-xl overflow-hidden border min-h-64" style={{ borderColor: 'var(--card-border)', backgroundColor: 'var(--card-bg)' }}>
+            {hasSelectedImage && !previewLoadError ? (
               selected.is_gif ? (
                 <GifStepPreview
                   gifUrl={selected.url}
@@ -43,15 +54,23 @@ export default function Sidebar({
                   alt={`Passo ${steps.indexOf(selected) + 1}`}
                   className="w-full h-64"
                   imgClassName="w-full h-64 object-cover"
+                  onError={() => setPreviewLoadError(true)}
                 />
               ) : (
-                <img src={selected.url} alt="selected" className="w-full h-64 object-cover" />
+                <img
+                  src={selected.url}
+                  alt={`Passo ${steps.indexOf(selected) + 1}`}
+                  className="w-full h-64 object-cover"
+                  onLoad={() => setPreviewLoadError(false)}
+                  onError={() => setPreviewLoadError(true)}
+                />
               )
             ) : (
-              <div className="w-full h-64 flex items-center justify-center" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--muted-text)' }}>
-                <div className="text-center space-y-2">
-                  <div className="text-sm font-medium">Passo sem imagem</div>
-                  <div className="text-xs">Adicione uma imagem ao capturar</div>
+              <div className="w-full h-64 flex items-center justify-center" style={{ color: 'var(--muted-text)' }}>
+                <div className="text-center space-y-3 px-4">
+                  <ImageOff className="h-10 w-10 mx-auto opacity-60" style={{ color: 'var(--muted-text)' }} />
+                  <div className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>Sem prévia deste passo</div>
+                  <div className="text-xs">A imagem não carregou ou o passo ainda não tem imagem. Capture um frame ou use o botão Editar.</div>
                 </div>
               </div>
             )}
@@ -101,7 +120,7 @@ export default function Sidebar({
           <textarea
             className="cb-textarea"
             rows={8}
-            placeholder="Descreva o passo... (ou use o botão IA para gerar automaticamente)"
+            placeholder="Descreva o que acontece neste passo… (ou use IA para gerar)."
             value={selected.description}
             onChange={(e) => updateDescription(selected.id, e.target.value)}
           />
@@ -119,16 +138,17 @@ export default function Sidebar({
       ) : (
         <div className="mb-6 text-center py-8">
           <div className="text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Nenhum passo selecionado</div>
-          <div className="text-xs" style={{ color: 'var(--muted-text)' }}>Selecione um passo da lista abaixo</div>
+          <div className="text-xs" style={{ color: 'var(--muted-text)' }}>Selecione um passo na lista para editar a descrição.</div>
         </div>
       )}
 
       <div className="flex-1 overflow-auto -mx-1 px-1">
+        <div className="text-xs font-medium mb-2" style={{ color: 'var(--muted-text)' }}>Todos os passos</div>
         <div className="space-y-2">
           {steps.length === 0 ? (
             <div className="text-center py-8">
-              <div className="text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Nenhum passo criado</div>
-              <div className="text-xs" style={{ color: 'var(--muted-text)' }}>Capture frames para começar</div>
+              <div className="text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>Nenhum passo ainda</div>
+              <div className="text-xs" style={{ color: 'var(--muted-text)' }}>Pause o vídeo e capture um frame (tecla S) para começar.</div>
             </div>
           ) : (
             steps.map((s, idx) => {
@@ -165,9 +185,8 @@ export default function Sidebar({
                     setDraggingId(null)
                   }}
                   onDragEnd={() => setDraggingId(null)}
-                  className={`group flex items-start gap-3 rounded-lg border p-3 text-left w-full transition-all ${
-                    draggingId === s.id ? 'opacity-50 border-dashed' : ''
-                  } ${isSelected ? 'ring-2' : ''} ${isGenerating ? 'animate-pulse' : ''}`}
+                  className={`group flex items-start gap-3 rounded-lg border p-3 text-left w-full transition-all ${draggingId === s.id ? 'opacity-50 border-dashed' : ''
+                    } ${isSelected ? 'ring-2' : ''} ${isGenerating ? 'animate-pulse' : ''}`}
                   style={{
                     backgroundColor: isSelected ? 'var(--accent-light)' : 'var(--card-bg)',
                     borderColor: isSelected ? 'var(--accent)' : 'var(--card-border)',

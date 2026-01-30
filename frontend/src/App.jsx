@@ -11,7 +11,7 @@ import ImportMarkdownModal from './components/ImportMarkdownModal'
 import EnhancedDocPreview from './components/EnhancedDocPreview'
 import GifPreviewModal from './components/GifPreviewModal'
 import GIF from 'gif.js'
-import { Play, FileVideo, Wand2, Settings, Download, Upload, FileText } from 'lucide-react'
+import { Play, FileVideo, Wand2, Settings, Download, Upload, FileText, Video } from 'lucide-react'
 
 const LS = {
   geminiModel: 'CLIPBUILDER_GEMINI_MODEL',
@@ -499,6 +499,51 @@ export default function App() {
     }
 
     const step = steps.find((s) => s.id === id)
+
+    // Para GIFs, usar endpoint /describe-gif
+    if (step?.is_gif && step?.blob) {
+      setAiStepBusyId(id)
+      try {
+        const form = new FormData()
+        form.append('file', new File([step.blob], 'clipbuilder.gif', { type: 'image/gif' }))
+        if (documentTitle && documentTitle.trim()) {
+          form.append('document_title', documentTitle.trim())
+        }
+        const contextParts = []
+        if (documentTitle && documentTitle.trim()) {
+          contextParts.push(`Título: ${documentTitle.trim()}`)
+        }
+        steps.forEach((s, i) => {
+          if (s.id !== id && s.description && s.description.trim()) {
+            contextParts.push(`Passo ${i + 1}: ${s.description.trim()}`)
+          }
+        })
+        if (contextParts.length > 0) {
+          form.append('document_context', contextParts.join('\n'))
+        }
+
+        const res = await api.post('/describe-gif', form, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        })
+        const text = res?.data?.description
+        if (text && typeof text === 'string' && text.trim()) {
+          updateDescription(id, text.trim())
+        }
+      } catch (e) {
+        const status = e?.response?.status
+        const detail = e?.response?.data?.detail
+        if (status === 429) {
+          setAiError(detail || 'Limite/quota do Gemini excedida (429).')
+        } else {
+          setAiError(detail ? `Falha ao descrever GIF com IA: ${detail}` : 'Falha ao descrever GIF com IA. Verifique o backend.')
+        }
+      } finally {
+        setAiStepBusyId(null)
+      }
+      return
+    }
+
+    // Para frames normais, precisa de timestamp
     if (!step?.timestamp) {
       setAiError('Não foi possível determinar o timestamp deste frame.')
       return
@@ -946,6 +991,31 @@ export default function App() {
     setGifDescribeLoading(true)
     let description = 'GIF animado'
 
+    // Capturar timestamp do momento atual do vídeo (se disponível)
+    const video = videoRef.current
+    const seconds = video ? Math.max(0, Number(video.currentTime) || 0) : null
+    const timestamp = seconds !== null ? formatTimestamp(seconds) : ''
+
+    // Gerar thumbnail do primeiro frame do GIF
+    let thumbnailUrl = null
+    try {
+      const img = new Image()
+      img.crossOrigin = 'anonymous'
+      await new Promise((resolve, reject) => {
+        img.onload = resolve
+        img.onerror = reject
+        img.src = gifUrl
+      })
+      const canvas = document.createElement('canvas')
+      canvas.width = img.naturalWidth
+      canvas.height = img.naturalHeight
+      const ctx = canvas.getContext('2d')
+      ctx.drawImage(img, 0, 0)
+      thumbnailUrl = canvas.toDataURL('image/png')
+    } catch (_) {
+      // Se falhar, thumbnailUrl fica null e o GifStepPreview tentará extrair
+    }
+
     try {
       const form = new FormData()
       form.append('file', new File([gifBlob], 'clipbuilder.gif', { type: 'image/gif' }))
@@ -979,15 +1049,18 @@ export default function App() {
     }
 
     const id = crypto.randomUUID()
+    // Criar novo blob URL para o passo (o gifUrl original será revogado no closeGifPreview)
+    const stepGifUrl = URL.createObjectURL(gifBlob)
     setSteps((prev) => [
       ...prev,
       {
         id,
         blob: gifBlob,
-        url: gifUrl,
+        url: stepGifUrl,
+        thumbnailUrl,
         description,
-        timestamp: '',
-        seconds: null,
+        timestamp,
+        seconds,
         has_image: true,
         is_gif: true
       }
@@ -1050,39 +1123,81 @@ export default function App() {
               )}
             </div>
             <div className="w-full max-w-[960px]">
-              <div className="space-y-3">
-                <button
-                  onClick={captureFrame}
-                  disabled={!videoUrl || capturing}
-                  className="cb-btn cb-btn-primary w-full h-12 text-base font-semibold"
-                >
-                  <Play className="h-5 w-5" />
-                  {capturing ? 'Capturando...' : 'Capturar Novo Passo'}
-                </button>
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    onClick={createTextStep}
-                    className="cb-btn w-full h-11"
-                  >
-                    <FileVideo className="h-4 w-4" />
-                    Passo texto
-                  </button>
-                  <button
-                    onClick={() => setSettingsOpen(true)}
-                    className="cb-btn w-full h-11"
-                  >
-                    <Settings className="h-4 w-4" />
-                    Configurações
-                  </button>
+              <div className="space-y-5">
+                {/* Criar: adicionar ao tutorial */}
+                <div>
+                  <div className="text-xs font-medium mb-2" style={{ color: 'var(--muted-text)' }}>Adicionar ao tutorial</div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      onClick={captureFrame}
+                      disabled={!videoUrl || capturing}
+                      className="cb-btn cb-btn-primary w-full h-12 text-base font-semibold"
+                      title="Pause no vídeo e capture (tecla S)"
+                    >
+                      <Play className="h-5 w-5" />
+                      {capturing ? 'Capturando...' : 'Capturar'}
+                    </button>
+                    {isRecordingGif ? (
+                      <button
+                        type="button"
+                        onClick={stopGifRecording}
+                        className="cb-btn w-full h-12 text-base font-semibold animate-pulse"
+                        style={{ backgroundColor: '#ef4444', color: 'white', borderColor: '#ef4444' }}
+                      >
+                        <span className="inline-block w-2 h-2 rounded-full bg-white"></span>
+                        Parar GIF
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={startGifRecording}
+                        disabled={!videoUrl || capturing}
+                        className="cb-btn w-full h-12 text-base font-semibold"
+                        title="Gravar parte do vídeo como GIF animado para o tutorial."
+                      >
+                        <Video className="h-5 w-5" />
+                        Gravar GIF
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <button
-                  onClick={exportDoc}
-                  disabled={busy || steps.length === 0}
-                  className="cb-btn w-full h-11 font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <Download className="h-4 w-4" />
-                  {busy ? 'Exportando...' : 'Exportar Tutorial'}
-                </button>
+
+                {/* Ajustes + Finalizar: mesma linha em telas médias */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                  <div>
+                    <div className="text-xs font-medium mb-2" style={{ color: 'var(--muted-text)' }}>Ajustes</div>
+                    <button
+                      onClick={() => setSettingsOpen(true)}
+                      className="cb-btn w-full h-11"
+                      title="Ajustar IA, exportação e backup"
+                    >
+                      <Settings className="h-4 w-4" />
+                      Configurações
+                    </button>
+                  </div>
+                  <div>
+                    <div className="text-xs font-medium mb-2" style={{ color: 'var(--muted-text)' }}>Finalizar</div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <button
+                        onClick={exportDoc}
+                        disabled={busy || steps.length === 0}
+                        className="cb-btn w-full h-11 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <Download className="h-4 w-4" />
+                        {busy ? 'Exportando...' : 'Exportar'}
+                      </button>
+                      <button
+                        onClick={enhanceDocument}
+                        disabled={enhanceLoading || steps.length === 0}
+                        className="cb-btn w-full h-11 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Transformar passos em documento técnico estruturado"
+                      >
+                        <Wand2 className="h-4 w-4" />
+                        {enhanceLoading ? 'Gerando...' : 'Doc Pro'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
 
                 {(error || aiError) ? (
                   <div className="rounded-lg border p-4 text-sm" style={{ borderColor: error ? 'var(--danger)' : 'var(--warning)', backgroundColor: error ? 'var(--danger-bg)' : 'var(--warning-bg)', color: error ? 'var(--danger)' : 'var(--warning)' }}>
@@ -1167,6 +1282,7 @@ export default function App() {
           open={enhancePreviewOpen}
           onClose={() => setEnhancePreviewOpen(false)}
           markdown={enhancedMarkdown}
+          onMarkdownChange={setEnhancedMarkdown}
           title={documentTitle}
         />
         <GifPreviewModal

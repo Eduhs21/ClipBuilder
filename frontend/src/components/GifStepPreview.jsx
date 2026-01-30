@@ -11,6 +11,7 @@ export default function GifStepPreview({
   alt = 'GIF',
   className = '',
   imgClassName = '',
+  onError,
   ...imgProps
 }) {
   const [thumbnailUrl, setThumbnailUrl] = useState(thumbnailUrlProp || null)
@@ -61,6 +62,7 @@ export default function GifStepPreview({
           alt=""
           aria-hidden
           onLoad={extractFirstFrame}
+          onError={onError}
           style={{ position: 'absolute', width: 0, height: 0, opacity: 0, pointerEvents: 'none' }}
         />
       )}
@@ -75,6 +77,7 @@ export default function GifStepPreview({
           transition: 'opacity 0.2s ease',
           opacity: 1,
         }}
+        onError={onError}
         {...imgProps}
       />
     </div>

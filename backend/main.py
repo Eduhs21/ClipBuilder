@@ -1909,6 +1909,54 @@ async def enhance_document(
 
 
 # ---------------------------------------------------------------------------
+# Markdown to DOCX (conversion only, no Groq)
+# ---------------------------------------------------------------------------
+
+@app.post("/markdown-to-docx")
+async def markdown_to_docx_endpoint(request: Request):
+    """
+    Converte markdown em ficheiro .docx.
+    Body JSON: { "markdown": "...", "title": "opcional" }.
+    Devolve o ficheiro .docx para download.
+    """
+    from export_from_markdown import markdown_to_docx
+
+    try:
+        body = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"JSON inválido: {exc}") from exc
+
+    markdown = body.get("markdown")
+    if markdown is None:
+        raise HTTPException(status_code=400, detail="Campo 'markdown' é obrigatório.")
+    markdown = (markdown or "").strip()
+    if not markdown:
+        raise HTTPException(status_code=400, detail="O markdown está vazio.")
+
+    title = (body.get("title") or "documento_profissional").strip()
+    safe_title = "".join(c if c.isalnum() or c in "._- " else "_" for c in title)[:80] or "documento_profissional"
+    filename = f"{safe_title}.docx"
+
+    try:
+        out_bytes = markdown_to_docx(markdown)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("Erro ao converter markdown para docx: %s", exc, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao exportar: {str(exc)[:200]}",
+        ) from exc
+
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    return StreamingResponse(
+        io.BytesIO(out_bytes),
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers=headers,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Describe GIF with Groq (generate step caption from GIF frames)
 # ---------------------------------------------------------------------------
 

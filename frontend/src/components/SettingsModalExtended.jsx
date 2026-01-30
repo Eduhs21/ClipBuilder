@@ -70,7 +70,10 @@ export default function SettingsModalExtended({ open, onClose, aiContext, setAiC
       <div className="cb-modal w-full max-w-2xl max-h-[90vh] overflow-y-auto">
         <div className="cb-modal-header">
           <div className="flex items-center justify-between">
-            <h2 className="cb-modal-title text-xl font-semibold text-slate-900">Configurações da IA</h2>
+            <div>
+              <h2 className="cb-modal-title text-xl font-semibold" style={{ color: 'var(--text)' }}>Configurações</h2>
+              <p className="text-sm mt-1" style={{ color: 'var(--muted-text)' }}>Como a IA deve escrever, formatar a exportação e fazer backup.</p>
+            </div>
             <button onClick={onClose} className="cb-btn p-2" aria-label="Fechar">
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -80,46 +83,66 @@ export default function SettingsModalExtended({ open, onClose, aiContext, setAiC
         </div>
         <div className="cb-modal-body">
 
-          <div>
-            <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text)' }}>Prompt padrão</label>
-            <textarea value={localPrompt} onChange={(e) => setLocalPrompt(e.target.value)} className="cb-textarea" rows={4} />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text)' }}>Exemplos rápidos</label>
-            <div className="flex items-center gap-2">
-              <select value={examplePreset} onChange={(e) => setExamplePreset(e.target.value)} className="cb-select flex-1">
-                <option value="none">— Nenhum —</option>
-                <option value="short_markdown">Resumo curto (Markdown)</option>
-                <option value="detailed_steps">Passos detalhados</option>
-                <option value="audience_beginner">Para iniciantes</option>
-              </select>
-              <button type="button" onClick={() => {
-                if (examplePreset === 'short_markdown') setLocalPrompt('Escreva um resumo curto em Markdown com título e 3 bullets.')
-                else if (examplePreset === 'detailed_steps') setLocalPrompt('Descreva passo a passo detalhado deste frame, incluindo ações e dicas práticas.')
-                else if (examplePreset === 'audience_beginner') setLocalPrompt('Explique este passo como se fosse para um iniciante, evitando jargões.')
-              }} className="cb-btn">Aplicar exemplo</button>
-            </div>
-            <div className="text-xs mt-1.5" style={{ color: 'var(--muted-text)' }}>Use exemplos rápidos para ajustar o tom do prompt.</div>
-          </div>
-
-          <div className="mb-4 flex items-center justify-between">
+          {/* Seção: Texto e IA */}
+          <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--text)' }}>Texto e IA</h3>
+          <div className="space-y-4 mb-6">
             <div>
-              <div className="text-sm font-medium">Preenchimento por IA</div>
-              <div className="text-xs mt-1" style={{ color: 'var(--muted-text)' }}>Controla só a geração automática ao capturar um passo (o botão “Gerar por IA” continua disponível).</div>
+              <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text)' }}>Prompt padrão</label>
+              <textarea value={localPrompt} onChange={(e) => setLocalPrompt(e.target.value)} className="cb-textarea" rows={4} />
             </div>
-            <label className="relative inline-flex cursor-pointer items-center">
-              <input
-                type="checkbox"
-                className="sr-only"
-                checked={localAiFillEnabled}
-                onChange={(e) => setLocalAiFillEnabled(e.target.checked)}
-              />
-              <div className={`h-6 w-11 rounded-full transition-colors ${localAiFillEnabled ? 'bg-emerald-500' : 'bg-slate-400'}`}></div>
-              <div className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${localAiFillEnabled ? 'translate-x-5' : 'translate-x-0'}`}></div>
-            </label>
+
+            <div>
+              <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text)' }}>Exemplos de prompt</label>
+              <div className="flex items-center gap-2">
+                <select value={examplePreset} onChange={(e) => setExamplePreset(e.target.value)} className="cb-select flex-1">
+                  <option value="none">— Nenhum —</option>
+                  <option value="short_markdown">Resumo curto (Markdown)</option>
+                  <option value="detailed_steps">Passos detalhados</option>
+                  <option value="audience_beginner">Para iniciantes</option>
+                </select>
+                <button type="button" onClick={() => {
+                  if (examplePreset === 'short_markdown') setLocalPrompt('Escreva um resumo curto em Markdown com título e 3 bullets.')
+                  else if (examplePreset === 'detailed_steps') setLocalPrompt('Descreva passo a passo detalhado deste frame, incluindo ações e dicas práticas.')
+                  else if (examplePreset === 'audience_beginner') setLocalPrompt('Explique este passo como se fosse para um iniciante, evitando jargões.')
+                }} className="cb-btn">Usar este exemplo</button>
+              </div>
+              <div className="text-xs mt-1.5" style={{ color: 'var(--muted-text)' }}>Escolha um estilo para a IA.</div>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-medium" style={{ color: 'var(--text)' }}>Preenchimento por IA</div>
+                <div className="text-xs mt-1" style={{ color: 'var(--muted-text)' }}>Controla só a geração automática ao capturar um passo (o botão “Gerar por IA” continua disponível).</div>
+              </div>
+              <label className="relative inline-flex cursor-pointer items-center flex-shrink-0">
+                <input
+                  type="checkbox"
+                  className="sr-only"
+                  checked={localAiFillEnabled}
+                  onChange={(e) => setLocalAiFillEnabled(e.target.checked)}
+                />
+                <div className="h-6 w-11 rounded-full transition-colors" style={{ backgroundColor: localAiFillEnabled ? 'var(--success)' : 'var(--card-border)' }}></div>
+                <div className="absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform shadow-sm" style={{ transform: localAiFillEnabled ? 'translateX(1.25rem)' : 'translateX(0)' }}></div>
+              </label>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <label className="text-sm font-medium whitespace-nowrap" style={{ color: 'var(--text)' }}>Modelo IA</label>
+              <select value={geminiModel} onChange={(e) => setGeminiModel(e.target.value)} className="cb-select flex-1">
+                <optgroup label="Google Gemini">
+                  <option value="models/gemini-2.5-flash">gemini-2.5-flash</option>
+                </optgroup>
+                <optgroup label="Groq (Llama 4 Vision)">
+                  <option value="meta-llama/llama-4-scout-17b-16e-instruct">Llama 4 Scout (rápido)</option>
+                  <option value="meta-llama/llama-4-maverick-17b-128e-instruct">Llama 4 Maverick (melhor)</option>
+                </optgroup>
+              </select>
+            </div>
           </div>
 
+          {/* Seção: Exportação */}
+          <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--text)' }}>Exportação</h3>
+          <div className="space-y-4 mb-6">
           <div>
             <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text)' }}>Nome dos arquivos de imagem (prefixo)</label>
             <input
@@ -138,39 +161,30 @@ export default function SettingsModalExtended({ open, onClose, aiContext, setAiC
             </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text)' }}>Formato de saída</label>
-            <select value={localFormat} onChange={(e) => setLocalFormat(e.target.value)} className="cb-select">
-              <option value="markdown">Markdown</option>
-              <option value="docx">Word (DOCX)</option>
-              <option value="html">HTML</option>
-              <option value="pdf">PDF</option>
-              <option value="plain">Texto simples</option>
-            </select>
-            <div className="text-xs mt-1.5 leading-relaxed" style={{ color: 'var(--muted-text)' }}>Escolha o formato no qual o conteúdo exportado/gerado deverá ser produzido.</div>
-          </div>
-
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-4 rounded-lg border" style={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--card-border)' }}>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input id="cfg-incl-ts" type="checkbox" checked={includeTimestamp} onChange={(e) => setIncludeTimestamp(e.target.checked)} className="h-4 w-4 rounded border" style={{ borderColor: 'var(--card-border)', accentColor: 'var(--accent)' }} />
-              <span className="text-sm font-medium" style={{ color: 'var(--text)' }}>Incluir timestamp nas descrições</span>
-            </label>
-            <div className="flex items-center gap-2">
-              <label className="text-sm font-medium whitespace-nowrap" style={{ color: 'var(--text)' }}>Modelo IA</label>
-              <select value={geminiModel} onChange={(e) => setGeminiModel(e.target.value)} className="cb-select">
-                <optgroup label="Google Gemini">
-                  <option value="models/gemini-2.5-flash">gemini-2.5-flash</option>
-                </optgroup>
-                <optgroup label="Groq (Llama 4 Vision)">
-                  <option value="meta-llama/llama-4-scout-17b-16e-instruct">Llama 4 Scout (rápido)</option>
-                  <option value="meta-llama/llama-4-maverick-17b-128e-instruct">Llama 4 Maverick (melhor)</option>
-                </optgroup>
+            <div>
+              <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text)' }}>Formato de saída</label>
+              <select value={localFormat} onChange={(e) => setLocalFormat(e.target.value)} className="cb-select">
+                <option value="markdown">Markdown</option>
+                <option value="docx">Word (DOCX)</option>
+                <option value="html">HTML</option>
+                <option value="pdf">PDF</option>
+                <option value="plain">Texto simples</option>
               </select>
+              <div className="text-xs mt-1.5 leading-relaxed" style={{ color: 'var(--muted-text)' }}>Escolha o formato no qual o conteúdo exportado/gerado deverá ser produzido.</div>
+            </div>
+
+            <div className="p-4 rounded-lg border" style={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--card-border)' }}>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input id="cfg-incl-ts" type="checkbox" checked={includeTimestamp} onChange={(e) => setIncludeTimestamp(e.target.checked)} className="h-4 w-4 rounded border" style={{ borderColor: 'var(--card-border)', accentColor: 'var(--accent)' }} />
+                <span className="text-sm font-medium" style={{ color: 'var(--text)' }}>Incluir timestamp nas descrições</span>
+              </label>
             </div>
           </div>
 
-          {/* Seção de Backup/Restore */}
-          <div className="p-4 rounded-lg border mt-4" style={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--card-border)' }}>
+          {/* Seção: Backup e documento */}
+          <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--text)' }}>Backup e documento</h3>
+          <div className="space-y-4">
+          <div className="p-4 rounded-lg border" style={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--card-border)' }}>
             <div className="text-sm font-medium mb-3" style={{ color: 'var(--text)' }}>Backup / Retomada</div>
             <div className="text-xs mb-3" style={{ color: 'var(--muted-text)' }}>
               Exporte sua documentação como Markdown para continuar depois, ou importe um arquivo salvo anteriormente.
@@ -199,24 +213,6 @@ export default function SettingsModalExtended({ open, onClose, aiContext, setAiC
               </button>
             </div>
           </div>
-
-          {/* Seção de Documento Profissional com IA */}
-          <div className="p-4 rounded-lg border mt-4" style={{ backgroundColor: 'var(--accent-bg)', borderColor: 'var(--accent)' }}>
-            <div className="text-sm font-medium mb-2" style={{ color: 'var(--text)' }}>🪄 Documento Profissional</div>
-            <div className="text-xs mb-3" style={{ color: 'var(--muted-text)' }}>
-              Use a IA (Groq) para transformar seus passos em um documento técnico estruturado com seções, objetivos, procedimentos, checklists e troubleshooting.
-            </div>
-            <button
-              onClick={() => {
-                onClose()
-                onEnhanceDocument?.()
-              }}
-              disabled={!stepsCount || stepsCount === 0 || enhanceLoading}
-              className="cb-btn cb-btn-primary w-full h-11 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Wand2 className="h-4 w-4" />
-              {enhanceLoading ? 'Gerando documento...' : 'Gerar Documento Profissional'}
-            </button>
           </div>
 
           <div className="cb-modal-footer">

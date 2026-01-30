@@ -18,41 +18,32 @@ export default function GifPreviewModal({
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
             <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="gif-preview-title"
                 className="relative w-full max-w-2xl mx-4 rounded-xl border shadow-2xl"
                 style={{
                     backgroundColor: 'var(--card-bg)',
                     borderColor: 'var(--panel-border)'
                 }}
             >
-                {/* Header + primary CTA */}
+                {/* Header */}
                 <div
-                    className="flex items-center justify-between gap-3 px-5 py-4 border-b flex-wrap"
+                    className="flex items-center justify-between gap-3 px-5 py-4 border-b"
                     style={{ borderColor: 'var(--panel-border)' }}
                 >
-                    <h2 className="text-lg font-semibold" style={{ color: 'var(--text)' }}>
-                        {isGenerating ? 'Gerando GIF...' : 'Preview do GIF'}
+                    <h2 id="gif-preview-title" className="text-lg font-semibold" style={{ color: 'var(--text)' }}>
+                        {isGenerating ? 'Montando seu GIF…' : 'Seu GIF está pronto'}
                     </h2>
-                    <div className="flex items-center gap-2">
-                        {!isGenerating && gifUrl && (
-                            <button
-                                onClick={onAddToDoc}
-                                disabled={gifDescribeLoading}
-                                className="cb-btn cb-btn-primary flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                                title="Adicionar este GIF como um passo no documento"
-                            >
-                                <Plus className="h-4 w-4" />
-                                {gifDescribeLoading ? 'Gerando legenda...' : 'Posicionar como Passo'}
-                            </button>
-                        )}
-                        <button
-                            onClick={onClose}
-                            className="p-1.5 rounded-lg transition-colors hover:bg-[var(--accent-light)]"
-                            style={{ color: 'var(--text-secondary)' }}
-                            disabled={isGenerating}
-                        >
-                            <X className="h-5 w-5" />
-                        </button>
-                    </div>
+                    <button
+                        onClick={onClose}
+                        className="p-1.5 rounded-lg transition-colors hover:bg-[var(--accent-light)]"
+                        style={{ color: 'var(--text-secondary)' }}
+                        disabled={isGenerating}
+                        aria-label="Fechar"
+                    >
+                        <X className="h-5 w-5" />
+                    </button>
                 </div>
 
                 {/* Content */}
@@ -66,7 +57,7 @@ export default function GifPreviewModal({
                                 </svg>
                             </div>
                             <div className="text-base font-medium mb-2" style={{ color: 'var(--text)' }}>
-                                Processando frames...
+                                Montando os frames…
                             </div>
                             <div className="w-64 h-2 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--panel-border)' }}>
                                 <div
@@ -79,6 +70,9 @@ export default function GifPreviewModal({
                             </div>
                             <div className="text-sm mt-2" style={{ color: 'var(--text-secondary)' }}>
                                 {Math.round(progress * 100)}%
+                            </div>
+                            <div className="text-xs mt-1" style={{ color: 'var(--muted-text)' }}>
+                                Isso pode levar alguns segundos
                             </div>
                         </div>
                     ) : gifUrl ? (
@@ -128,7 +122,7 @@ export default function GifPreviewModal({
                             className="cb-btn cb-btn-primary flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             <Plus className="h-4 w-4" />
-                            {gifDescribeLoading ? 'Gerando legenda...' : 'Adicionar à Doc'}
+                            {gifDescribeLoading ? 'Criando descrição…' : 'Incluir nos passos'}
                         </button>
                     </div>
                 )}

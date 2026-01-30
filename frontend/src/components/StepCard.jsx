@@ -41,7 +41,7 @@ export default function StepCard({ s, idx, updateDescription, generateWithAI, re
               className="cb-btn cb-btn-primary px-6 py-4 text-xl"
               onClick={() => generateWithAI(s.id)}
               type="button"
-              disabled={!videoId || !hasTimestamp || aiStatus !== 'ready' || aiStepBusyId === s.id}
+              disabled={!videoId || (!hasTimestamp && !s.is_gif) || aiStatus !== 'ready' || aiStepBusyId === s.id}
             >
               {aiStepBusyId === s.id ? 'Gerando...' : 'Gerar com IA'}
             </button>
