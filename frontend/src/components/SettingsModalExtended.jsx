@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react'
 import { FileText, Upload, Download, Wand2 } from 'lucide-react'
 
-export default function SettingsModalExtended({ open, onClose, aiContext, setAiContext, savedPrompt, setSavedPrompt, includeTimestamp, setIncludeTimestamp, geminiModel, setGeminiModel, outputFormat, setOutputFormat, imageNamePrefix, setImageNamePrefix, aiFillEnabled, setAiFillEnabled, onExportMarkdown, onImportMarkdown, onEnhanceDocument, stepsCount, enhanceLoading }) {
+export default function SettingsModalExtended({ open, onClose, aiContext, setAiContext, savedPrompt, setSavedPrompt, includeTimestamp, setIncludeTimestamp, geminiModel, setGeminiModel, imageNamePrefix, setImageNamePrefix, aiFillEnabled, setAiFillEnabled, onExportMarkdown, onImportMarkdown, onEnhanceDocument, stepsCount, enhanceLoading }) {
   const [localPrompt, setLocalPrompt] = useState(aiContext || '')
-  const [localFormat, setLocalFormat] = useState(outputFormat || 'markdown')
   const [localImagePrefix, setLocalImagePrefix] = useState(imageNamePrefix || 'step_')
   const [localAiFillEnabled, setLocalAiFillEnabled] = useState(!!aiFillEnabled)
   const [examplePreset, setExamplePreset] = useState('none')
@@ -18,10 +17,6 @@ export default function SettingsModalExtended({ open, onClose, aiContext, setAiC
   }, [aiContext])
 
   useEffect(() => {
-    setLocalFormat(outputFormat || 'markdown')
-  }, [outputFormat])
-
-  useEffect(() => {
     setLocalImagePrefix(imageNamePrefix || 'step_')
   }, [imageNamePrefix])
 
@@ -31,7 +26,6 @@ export default function SettingsModalExtended({ open, onClose, aiContext, setAiC
 
   const hasUnsavedChanges =
     (localPrompt || '') !== (aiContext || '') ||
-    (localFormat || 'markdown') !== (outputFormat || 'markdown') ||
     normalizePrefix(localImagePrefix) !== normalizePrefix(imageNamePrefix) ||
     !!localAiFillEnabled !== !!aiFillEnabled
 
@@ -48,10 +42,6 @@ export default function SettingsModalExtended({ open, onClose, aiContext, setAiC
     } catch { }
     setSavedPrompt(localPrompt)
     setAiContext(localPrompt)
-    try {
-      localStorage.setItem('CLIPBUILDER_OUTPUT_FORMAT', localFormat)
-    } catch { }
-    setOutputFormat(localFormat)
 
     try {
       localStorage.setItem('CLIPBUILDER_IMAGE_NAME_PREFIX', imagePrefixTrim)
@@ -143,77 +133,26 @@ export default function SettingsModalExtended({ open, onClose, aiContext, setAiC
           {/* Seção: Exportação */}
           <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--text)' }}>Exportação</h3>
           <div className="space-y-4 mb-6">
-          <div>
-            <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text)' }}>Nome dos arquivos de imagem (prefixo)</label>
-            <input
-              value={localImagePrefix}
-              onChange={(e) => setLocalImagePrefix(e.target.value)}
-              className={`cb-input ${!isImagePrefixValid ? 'border-[var(--danger)]' : ''}`}
-              placeholder="step_"
-            />
-            {!isImagePrefixValid ? (
-              <div className="text-xs mt-1.5 font-medium" style={{ color: 'var(--danger)' }}>
-                Esse campo é obrigatório.
-              </div>
-            ) : null}
-            <div className="text-xs mt-1.5 leading-relaxed" style={{ color: 'var(--muted-text)' }}>
-              Ex.: <span className="font-mono">passo_</span> → <span className="font-mono">passo_01.png</span>, <span className="font-mono">passo_02.png</span>… (vale para o ZIP exportado)
-            </div>
-          </div>
-
             <div>
-              <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text)' }}>Formato de saída</label>
-              <select value={localFormat} onChange={(e) => setLocalFormat(e.target.value)} className="cb-select">
-                <option value="markdown">Markdown</option>
-                <option value="docx">Word (DOCX)</option>
-                <option value="html">HTML</option>
-                <option value="pdf">PDF</option>
-                <option value="plain">Texto simples</option>
-              </select>
-              <div className="text-xs mt-1.5 leading-relaxed" style={{ color: 'var(--muted-text)' }}>Escolha o formato no qual o conteúdo exportado/gerado deverá ser produzido.</div>
+              <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text)' }}>Nome dos arquivos de imagem (prefixo)</label>
+              <input
+                value={localImagePrefix}
+                onChange={(e) => setLocalImagePrefix(e.target.value)}
+                className={`cb-input ${!isImagePrefixValid ? 'border-[var(--danger)]' : ''}`}
+                placeholder="step_"
+              />
+              {!isImagePrefixValid ? (
+                <div className="text-xs mt-1.5 font-medium" style={{ color: 'var(--danger)' }}>
+                  Esse campo é obrigatório.
+                </div>
+              ) : null}
+              <div className="text-xs mt-1.5 leading-relaxed" style={{ color: 'var(--muted-text)' }}>
+                Ex.: <span className="font-mono">passo_</span> → <span className="font-mono">passo_01.png</span>, <span className="font-mono">passo_02.png</span>… (vale para o ZIP exportado)
+              </div>
             </div>
+          </div>
 
-            <div className="p-4 rounded-lg border" style={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--card-border)' }}>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input id="cfg-incl-ts" type="checkbox" checked={includeTimestamp} onChange={(e) => setIncludeTimestamp(e.target.checked)} className="h-4 w-4 rounded border" style={{ borderColor: 'var(--card-border)', accentColor: 'var(--accent)' }} />
-                <span className="text-sm font-medium" style={{ color: 'var(--text)' }}>Incluir timestamp nas descrições</span>
-              </label>
-            </div>
-          </div>
 
-          {/* Seção: Backup e documento */}
-          <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--text)' }}>Backup e documento</h3>
-          <div className="space-y-4">
-          <div className="p-4 rounded-lg border" style={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--card-border)' }}>
-            <div className="text-sm font-medium mb-3" style={{ color: 'var(--text)' }}>Backup / Retomada</div>
-            <div className="text-xs mb-3" style={{ color: 'var(--muted-text)' }}>
-              Exporte sua documentação como Markdown para continuar depois, ou importe um arquivo salvo anteriormente.
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                onClick={() => {
-                  onClose()
-                  onExportMarkdown?.()
-                }}
-                disabled={!stepsCount || stepsCount === 0}
-                className="cb-btn h-10 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <Download className="h-4 w-4" />
-                Exportar .md
-              </button>
-              <button
-                onClick={() => {
-                  onClose()
-                  onImportMarkdown?.()
-                }}
-                className="cb-btn h-10"
-              >
-                <Upload className="h-4 w-4" />
-                Importar .md
-              </button>
-            </div>
-          </div>
-          </div>
 
           <div className="cb-modal-footer">
             <button

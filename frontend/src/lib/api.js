@@ -97,6 +97,52 @@ export async function downloadMarkdownAsDocx(markdown, filename = 'documento_pro
   URL.revokeObjectURL(url)
 }
 
+/**
+ * Converte markdown em .pdf e dispara o download no browser.
+ * @param {string} markdown - Conteúdo em markdown
+ * @param {string} [filename] - Nome do ficheiro (ex: "documento.pdf")
+ */
+export async function downloadMarkdownAsPdf(markdown, filename = 'documento.pdf') {
+  const safeName = (filename || 'documento.pdf')
+    .replace(/[^a-zA-Z0-9._-]/g, '_')
+    .slice(0, 80)
+  const finalName = safeName.endsWith('.pdf') ? safeName : `${safeName}.pdf`
+  const title = finalName.replace('.pdf', '')
+  const response = await api.post('/markdown-to-pdf', { markdown, title }, { responseType: 'blob' })
+  const blob = response.data
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = finalName
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
+/**
+ * Converte markdown em .html e dispara o download no browser.
+ * @param {string} markdown - Conteúdo em markdown
+ * @param {string} [filename] - Nome do ficheiro (ex: "documento.html")
+ */
+export async function downloadMarkdownAsHtml(markdown, filename = 'documento.html') {
+  const safeName = (filename || 'documento.html')
+    .replace(/[^a-zA-Z0-9._-]/g, '_')
+    .slice(0, 80)
+  const finalName = safeName.endsWith('.html') ? safeName : `${safeName}.html`
+  const title = finalName.replace('.html', '')
+  const response = await api.post('/markdown-to-html', { markdown, title }, { responseType: 'blob' })
+  const blob = response.data
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = finalName
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
 // Expose helper to clear stored credentials
 export function clearStoredConfig() {
   try {

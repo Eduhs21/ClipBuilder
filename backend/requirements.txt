@@ -15,6 +15,9 @@ Pillow>=10.0.0
 # Optional: export as PDF
 reportlab>=4.0.0
 
+# Optional: markdown to HTML (Doc Pro export)
+markdown2>=2.4.0
+
 # Optional: extract text from PDF (format-and-export pipeline)
 pypdf>=4.0.0
 

@@ -1985,10 +1985,132 @@ async def markdown_to_docx_endpoint(request: Request):
 
 
 # ---------------------------------------------------------------------------
-# Describe GIF with Groq (generate step caption from GIF frames)
+# Markdown to PDF (conversion only, no Groq)
 # ---------------------------------------------------------------------------
 
-MAX_GIF_BYTES = 20 * 1024 * 1024  # 20 MB
+@app.post("/markdown-to-pdf")
+async def markdown_to_pdf_endpoint(request: Request):
+    """
+    Converte markdown em ficheiro .pdf.
+    Body JSON: { "markdown": "...", "title": "opcional" }.
+    Devolve o ficheiro .pdf para download.
+    """
+    from export_from_markdown import markdown_to_pdf
+
+    try:
+        body = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"JSON inválido: {exc}") from exc
+
+    markdown = body.get("markdown")
+    if markdown is None:
+        raise HTTPException(status_code=400, detail="Campo 'markdown' é obrigatório.")
+    markdown = (markdown or "").strip()
+    if not markdown:
+        raise HTTPException(status_code=400, detail="O markdown está vazio.")
+
+    title = (body.get("title") or "documento").strip()
+    safe_title = "".join(c if c.isalnum() or c in "._- " else "_" for c in title)[:80] or "documento"
+    filename = f"{safe_title}.pdf"
+
+    try:
+        out_bytes = markdown_to_pdf(markdown)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("Erro ao converter markdown para pdf: %s", exc, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao exportar PDF: {str(exc)[:200]}",
+        ) from exc
+
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    return StreamingResponse(
+        io.BytesIO(out_bytes),
+        media_type="application/pdf",
+        headers=headers,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Markdown to HTML (conversion only, no Groq)
+# ---------------------------------------------------------------------------
+
+@app.post("/markdown-to-html")
+async def markdown_to_html_endpoint(request: Request):
+    """
+    Converte markdown em ficheiro .html.
+    Body JSON: { "markdown": "...", "title": "opcional" }.
+    Devolve o ficheiro .html para download.
+    """
+    try:
+        import markdown2
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="Dependência 'markdown2' não instalada. Instale no backend: pip install markdown2",
+        ) from exc
+
+    try:
+        body = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"JSON inválido: {exc}") from exc
+
+    markdown = body.get("markdown")
+    if markdown is None:
+        raise HTTPException(status_code=400, detail="Campo 'markdown' é obrigatório.")
+    markdown = (markdown or "").strip()
+
+    title = (body.get("title") or "Documento").strip()
+    safe_title = "".join(c if c.isalnum() or c in "._- " else "_" for c in title)[:80] or "Documento"
+    filename = f"{safe_title}.html"
+
+    def _escape_html_attr(s: str) -> str:
+        return (
+            s.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace('"', "&quot;")
+        )
+
+    try:
+        html_body = markdown2.markdown(
+            markdown,
+            extras=["fenced-code-blocks", "tables", "break-on-newline", "nl2br"],
+        )
+    except Exception as exc:
+        logger.error("Erro ao converter markdown para html: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Erro ao converter: {str(exc)[:200]}") from exc
+
+    html_doc = (
+        "<!doctype html>\n"
+        '<html lang="pt-br">\n'
+        "<head>\n"
+        "  <meta charset=\"utf-8\"/>\n"
+        "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/>\n"
+        f"  <title>{_escape_html_attr(safe_title)}</title>\n"
+        "  <style>"
+        "body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Arial,sans-serif;max-width:900px;margin:24px auto;padding:0 16px;line-height:1.5;}"
+        "h1{margin:0 0 16px} h2{margin:24px 0 8px} h3{margin:18px 0 6px}"
+        "img{max-width:100%;height:auto;border:1px solid #ddd;border-radius:8px}"
+        "pre,code{background:#f6f8fa;padding:2px 6px;border-radius:4px;font-size:0.9em}"
+        "pre{overflow:auto;padding:12px}"
+        "table{border-collapse:collapse;width:100%} th,td{border:1px solid #ddd;padding:8px;text-align:left}"
+        "</style>\n"
+        "</head>\n"
+        "<body>\n"
+        f"  {html_body}\n"
+        "</body>\n"
+        "</html>\n"
+    )
+
+    html_bytes = html_doc.encode("utf-8")
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    return StreamingResponse(
+        io.BytesIO(html_bytes),
+        media_type="text/html; charset=utf-8",
+        headers=headers,
+    )
 
 @app.post("/describe-gif")
 async def describe_gif(

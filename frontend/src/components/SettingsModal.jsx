@@ -28,11 +28,7 @@ export default function SettingsModal({ open, onClose, aiContext, setAiContext, 
           <textarea value={localPrompt} onChange={(e) => setLocalPrompt(e.target.value)} className="w-full rounded border px-2 py-1" rows={4} style={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text)' }} />
         </div>
 
-        <div className="mb-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <input id="cfg-incl-ts" type="checkbox" checked={includeTimestamp} onChange={(e) => setIncludeTimestamp(e.target.checked)} />
-            <label htmlFor="cfg-incl-ts" className="text-sm">Incluir timestamp nas descrições</label>
-          </div>
+        <div className="mb-4 flex items-center justify-end">
           <div>
             <label className="text-sm mr-2">Modelo Gemini</label>
             <select value={geminiModel} onChange={(e) => setGeminiModel(e.target.value)} className="rounded border px-2 py-1" style={{ backgroundColor: 'var(--card-bg)', borderColor: 'var(--card-border)', color: 'var(--text)' }}>

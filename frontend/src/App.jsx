@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { api, getApiUrl } from './lib/api'
+import { api, getApiUrl, downloadMarkdownAsDocx, downloadMarkdownAsPdf, downloadMarkdownAsHtml } from './lib/api'
 import { generateMarkdown, parseMarkdown, validateSchema, generateFilename } from './lib/markdownUtils'
 import Header from './components/Header'
 import VideoArea from './components/VideoArea'
@@ -11,14 +11,13 @@ import ImportMarkdownModal from './components/ImportMarkdownModal'
 import EnhancedDocPreview from './components/EnhancedDocPreview'
 import GifPreviewModal from './components/GifPreviewModal'
 import GIF from 'gif.js'
-import { Play, FileVideo, Wand2, Settings, Download, Upload, FileText, Video, Loader2 } from 'lucide-react'
+import { Play, FileVideo, Wand2, Settings, Download, Upload, FileText, Video, Loader2, ChevronDown } from 'lucide-react'
 
 const LS = {
   geminiModel: 'CLIPBUILDER_GEMINI_MODEL',
   dark: 'CLIPBUILDER_DARK',
   savedPrompt: 'CLIPBUILDER_SAVED_PROMPT',
   aiFillEnabled: 'CLIPBUILDER_AI_FILL_ENABLED',
-  outputFormat: 'CLIPBUILDER_OUTPUT_FORMAT',
   imageNamePrefix: 'CLIPBUILDER_IMAGE_NAME_PREFIX',
   includeTimestamp: 'CLIPBUILDER_INCLUDE_TIMESTAMP'
 }
@@ -80,6 +79,13 @@ function formatTimestamp(seconds) {
 }
 
 export default function App() {
+    const [darkMode, setDarkMode] = useState(() => {
+      try {
+        return lsGet(LS.dark) === '1'
+      } catch {
+        return false
+      }
+    })
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
   const youtubePollRef = useRef(null)
@@ -113,16 +119,8 @@ export default function App() {
   const [capturing, setCapturing] = useState(false)
   const [aiContext, setAiContext] = useState('')
   const [includeTimestamp, setIncludeTimestamp] = useState(() => {
-    const raw = lsGet(LS.includeTimestamp)
-    if (raw === null || raw === undefined || raw === '') return false
-    return raw === '1' || raw === 'true'
-  })
-  const [darkMode, setDarkMode] = useState(() => {
-    try {
-      return lsGet(LS.dark) === '1'
-    } catch {
-      return false
-    }
+    const v = lsGet(LS.includeTimestamp)
+    return v === undefined ? true : v === 'true'
   })
   const [savedPrompt, setSavedPrompt] = useState(() => {
     try {
@@ -141,9 +139,6 @@ export default function App() {
       return false
     }
   })
-  const [outputFormat, setOutputFormat] = useState(() => {
-    try { return lsGet(LS.outputFormat) || 'markdown' } catch { return 'markdown' }
-  })
   const [imageNamePrefix, setImageNamePrefix] = useState(() => {
     try { return lsGet(LS.imageNamePrefix) || 'step_' } catch { return 'step_' }
   })
@@ -156,6 +151,8 @@ export default function App() {
   const [enhanceLoading, setEnhanceLoading] = useState(false)
   const [enhancedMarkdown, setEnhancedMarkdown] = useState('')
   const [enhancePreviewOpen, setEnhancePreviewOpen] = useState(false)
+  const [docProDropdownOpen, setDocProDropdownOpen] = useState(false)
+  const docProDropdownRef = useRef(null)
   const [documentStatus, setDocumentStatus] = useState('em_progresso') // em_progresso | pausado | concluido
   const [lastCompletedStep, setLastCompletedStep] = useState(0)
   const [documentOverview, setDocumentOverview] = useState('')
@@ -229,6 +226,17 @@ export default function App() {
       else document.documentElement.classList.remove('dark')
     } catch { }
   }, [darkMode])
+
+  useEffect(() => {
+    if (!docProDropdownOpen) return
+    function handleClickOutside(e) {
+      if (docProDropdownRef.current && !docProDropdownRef.current.contains(e.target)) {
+        setDocProDropdownOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [docProDropdownOpen])
 
   function onPickVideo(file) {
     setError('')
@@ -732,8 +740,8 @@ export default function App() {
     }
   }
 
-  // === FUNÇÃO DE ENHANCEMENT COM GROQ ===
-  async function enhanceDocument() {
+  // === FUNÇÃO DE ENHANCEMENT COM GROQ (Doc Pro) ===
+  async function enhanceAndExport(format) {
     setError('')
     setAiError('')
 
@@ -742,9 +750,11 @@ export default function App() {
       return
     }
 
+    const title = documentTitle || 'Documento Sem Título'
+    const safeTitle = (title || 'documento').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 50)
+
     setEnhanceLoading(true)
     try {
-      // Preparar os passos para enviar
       const stepsPayload = steps.map((step) => ({
         description: step.description || '',
         timestamp: step.timestamp || '',
@@ -752,7 +762,7 @@ export default function App() {
       }))
 
       const response = await api.post('/enhance-document', {
-        title: documentTitle || 'Documento Sem Título',
+        title,
         steps: stepsPayload
       })
 
@@ -761,8 +771,24 @@ export default function App() {
         throw new Error('Resposta vazia do servidor')
       }
 
-      setEnhancedMarkdown(markdown)
-      setEnhancePreviewOpen(true)
+      if (format === 'md') {
+        setEnhancedMarkdown(markdown)
+        setEnhancePreviewOpen(true)
+        return
+      }
+
+      if (format === 'docx') {
+        await downloadMarkdownAsDocx(markdown, `${safeTitle}.docx`, true)
+        return
+      }
+      if (format === 'pdf') {
+        await downloadMarkdownAsPdf(markdown, `${safeTitle}.pdf`)
+        return
+      }
+      if (format === 'html') {
+        await downloadMarkdownAsHtml(markdown, `${safeTitle}.html`)
+        return
+      }
     } catch (e) {
       const status = e?.response?.status
       const detail = e?.response?.data?.detail
@@ -835,7 +861,7 @@ export default function App() {
         )
       )
       form.append('image_name_prefix', prefix)
-      form.append('output_format', outputFormat || 'markdown')
+      form.append('output_format', 'markdown')
 
       // Only send images for steps that actually have them.
       steps.forEach((s, idx) => {
@@ -850,7 +876,7 @@ export default function App() {
 
       const cd = res?.headers?.['content-disposition']
       const serverName = parseFilenameFromContentDisposition(cd)
-      const fallbackName = (outputFormat === 'html' ? 'tutorial.html' : outputFormat === 'docx' ? 'tutorial.docx' : outputFormat === 'pdf' ? 'tutorial.pdf' : outputFormat === 'plain' ? 'tutorial.txt' : 'clipbuilder_export.zip')
+      const fallbackName = 'clipbuilder_export.zip'
       downloadBlob(res.data, serverName || fallbackName)
     } catch (e) {
       const status = e?.response?.status
@@ -1223,40 +1249,103 @@ export default function App() {
                 {/* Ajustes + Finalizar: mesma linha em telas médias */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                   <div>
-                    <div className="text-xs font-medium mb-2" style={{ color: 'var(--muted-text)' }}>Ajustes</div>
-                    <button
-                      onClick={() => setSettingsOpen(true)}
-                      className="cb-btn w-full h-11"
-                      title="Ajustar IA, exportação e backup"
-                    >
-                      <Settings className="h-4 w-4" />
-                      Configurações
-                    </button>
-                  </div>
-                  <div>
-                    <div className="text-xs font-medium mb-2" style={{ color: 'var(--muted-text)' }}>Finalizar</div>
+                    <div className="text-xs font-medium mb-2" style={{ color: 'var(--muted-text)' }}>Projeto</div>
                     <div className="grid grid-cols-2 gap-3">
                       <button
-                        onClick={exportDoc}
-                        disabled={busy || steps.length === 0}
-                        className="cb-btn w-full h-11 disabled:opacity-50 disabled:cursor-not-allowed"
+                        onClick={() => setSettingsOpen(true)}
+                        className="cb-btn w-full h-11"
+                        title="Ajustar IA, exportação e backup"
                       >
-                        <Download className="h-4 w-4" />
-                        {busy ? 'Exportando...' : 'Exportar'}
+                        <Settings className="h-4 w-4" />
+                        Config
                       </button>
                       <button
-                        onClick={enhanceDocument}
-                        disabled={enhanceLoading || steps.length === 0}
-                        className="cb-btn w-full h-11 disabled:opacity-50 disabled:cursor-not-allowed"
-                        title="Transformar passos em documento técnico estruturado (IA reprocessa todos os passos)"
+                        onClick={() => setImportModalOpen(true)}
+                        className="cb-btn w-full h-11"
+                        title="Importar projeto (.md)"
                       >
-                        {enhanceLoading ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Wand2 className="h-4 w-4" />
-                        )}
-                        {enhanceLoading ? 'Gerando Doc Pro...' : 'Doc Pro'}
+                        <Upload className="h-4 w-4" />
+                        Importar
                       </button>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs font-medium mb-2" style={{ color: 'var(--muted-text)' }}>Exportar</div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <button
+                        onClick={exportMarkdownDoc}
+                        disabled={busy || steps.length === 0}
+                        className="cb-btn w-full h-11 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Salvar projeto (.md + imagens)"
+                      >
+                        <Download className="h-4 w-4" />
+                        {busy ? 'Salvando...' : 'Exportar .md'}
+                      </button>
+                      <div ref={docProDropdownRef} className="relative w-full">
+                        <div className="flex rounded-lg overflow-hidden border w-full" style={{ borderColor: 'var(--card-border)' }}>
+                          <button
+                            onClick={() => {
+                              if (enhanceLoading || steps.length === 0) return
+                              setDocProDropdownOpen((v) => !v)
+                            }}
+                            disabled={enhanceLoading || steps.length === 0}
+                            className="cb-btn flex-1 h-11 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
+                            title="Doc Pro: gerar documento e escolher formato (MD, DOCX, HTML, PDF)"
+                            aria-haspopup="listbox"
+                            aria-expanded={docProDropdownOpen}
+                            aria-label="Doc Pro — abrir opções de formato"
+                          >
+                            {enhanceLoading ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Wand2 className="h-4 w-4" />
+                            )}
+                            {enhanceLoading ? 'Gerando...' : 'Doc Pro'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (enhanceLoading || steps.length === 0) return
+                              setDocProDropdownOpen((v) => !v)
+                            }}
+                            disabled={enhanceLoading || steps.length === 0}
+                            className="cb-btn h-11 px-2 flex items-center disabled:opacity-50 disabled:cursor-not-allowed border-l transition-all duration-200"
+                            style={{ borderColor: 'var(--card-border)' }}
+                            aria-label="Abrir opções de formato"
+                          >
+                            <ChevronDown className={`h-4 w-4 transition-transform duration-200 ${docProDropdownOpen ? 'rotate-180' : ''}`} />
+                          </button>
+                        </div>
+                        {docProDropdownOpen ? (
+                          <ul
+                            role="listbox"
+                            className="absolute left-0 right-0 top-full mt-1 z-50 rounded-lg border shadow-lg py-1 min-w-[10rem]"
+                            style={{ backgroundColor: 'var(--panel)', borderColor: 'var(--panel-border)' }}
+                          >
+                            {[
+                              { id: 'md', label: 'Markdown (MD)', desc: 'Abrir preview e baixar .md' },
+                              { id: 'docx', label: 'Word (DOCX)', desc: 'Baixar .docx' },
+                              { id: 'html', label: 'HTML', desc: 'Baixar .html' },
+                              { id: 'pdf', label: 'PDF', desc: 'Baixar .pdf' }
+                            ].map((opt) => (
+                              <li key={opt.id} role="option">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setDocProDropdownOpen(false)
+                                    enhanceAndExport(opt.id)
+                                  }}
+                                  className="w-full text-left px-4 py-2.5 text-sm transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
+                                  style={{ color: 'var(--text)' }}
+                                >
+                                  <span className="font-medium">{opt.label}</span>
+                                  <span className="block text-xs mt-0.5" style={{ color: 'var(--muted-text)' }}>{opt.desc}</span>
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1319,19 +1408,15 @@ export default function App() {
           setAiContext={setAiContext}
           savedPrompt={savedPrompt}
           setSavedPrompt={setSavedPrompt}
-          includeTimestamp={includeTimestamp}
-          setIncludeTimestamp={setIncludeTimestamp}
           geminiModel={geminiModel}
           setGeminiModel={setGeminiModel}
-          outputFormat={outputFormat}
-          setOutputFormat={setOutputFormat}
           imageNamePrefix={imageNamePrefix}
           setImageNamePrefix={setImageNamePrefix}
           aiFillEnabled={aiFillEnabled}
           setAiFillEnabled={setAiFillEnabled}
           onExportMarkdown={exportMarkdownDoc}
           onImportMarkdown={() => setImportModalOpen(true)}
-          onEnhanceDocument={enhanceDocument}
+          onEnhanceDocument={() => enhanceAndExport('md')}
           stepsCount={steps.length}
           enhanceLoading={enhanceLoading}
         />
@@ -1346,6 +1431,7 @@ export default function App() {
           markdown={enhancedMarkdown}
           onMarkdownChange={setEnhancedMarkdown}
           title={documentTitle}
+          steps={steps}
         />
         <GifPreviewModal
           isOpen={gifPreviewOpen}
