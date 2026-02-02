@@ -2,7 +2,8 @@ import axios from 'axios'
 
 const LS = {
   apiUrl: 'CLIPBUILDER_API_URL',
-  googleApiKey: 'CLIPBUILDER_GOOGLE_API_KEY'
+  googleApiKey: 'CLIPBUILDER_GOOGLE_API_KEY',
+  accessToken: 'CLIPBUILDER_ACCESS_TOKEN'
 }
 
 // Determine default baseURL from Vite env, localStorage, or fallback
@@ -27,6 +28,46 @@ function resolveDefaultBaseUrl() {
 export const api = axios.create({
   baseURL: resolveDefaultBaseUrl()
 })
+
+export function setAuthToken(token) {
+  const t = (token || '').toString().trim()
+  if (t) {
+    api.defaults.headers.common['Authorization'] = 'Bearer ' + t
+    try {
+      localStorage.setItem(LS.accessToken, t)
+    } catch {}
+  } else {
+    clearAuthToken()
+  }
+}
+
+export function clearAuthToken() {
+  if (api.defaults.headers?.common) delete api.defaults.headers.common['Authorization']
+  try {
+    localStorage.removeItem(LS.accessToken)
+  } catch {}
+}
+
+export function getStoredToken() {
+  try {
+    return localStorage.getItem(LS.accessToken) || null
+  } catch {
+    return null
+  }
+}
+
+api.interceptors.response.use(
+  (res) => res,
+  (err) => {
+    if (err?.response?.status === 401) {
+      clearAuthToken()
+      if (typeof window !== 'undefined' && window.location?.pathname !== '/login' && window.location?.pathname !== '/register' && window.location?.pathname !== '/forgot-password') {
+        window.location.href = '/login'
+      }
+    }
+    return Promise.reject(err)
+  }
+)
 
 export function setApiUrl(url) {
   const u = (url || '').toString().trim()
@@ -66,6 +107,8 @@ export function setGoogleApiKey(key) {
 try {
   const storedKey = localStorage.getItem(LS.googleApiKey) || ''
   if (storedKey) api.defaults.headers['X-Google-Api-Key'] = storedKey
+  const token = localStorage.getItem(LS.accessToken) || ''
+  if (token) api.defaults.headers.common['Authorization'] = 'Bearer ' + token
 } catch (e) {
   // ignore (SSR or restricted env)
 }
@@ -145,12 +188,16 @@ export async function downloadMarkdownAsHtml(markdown, filename = 'documento.htm
 
 // Expose helper to clear stored credentials
 export function clearStoredConfig() {
+  clearAuthToken()
   try {
     localStorage.removeItem(LS.googleApiKey)
   } catch {}
   try {
     localStorage.removeItem(LS.apiUrl)
   } catch {}
-  if (api.defaults.headers) delete api.defaults.headers['X-Google-Api-Key']
+  if (api.defaults.headers) {
+    delete api.defaults.headers['X-Google-Api-Key']
+    delete api.defaults.headers.common?.['Authorization']
+  }
   delete api.defaults.baseURL
 }

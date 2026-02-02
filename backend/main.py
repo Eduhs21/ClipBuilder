@@ -21,11 +21,14 @@ from typing import Any
 from urllib.parse import urlparse
 
 import anyio
-from fastapi import BackgroundTasks, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse
+
+from app.auth.deps import CurrentAuthorizedUser
+from app.auth.router import router as auth_router
 
 try:
     from dotenv import load_dotenv
@@ -138,6 +141,7 @@ YTDLP_COOKIES_FROM_BROWSER = (os.getenv("CLIPBUILDER_YTDLP_COOKIES_FROM_BROWSER"
 YTDLP_COOKIES_FROM_BROWSER_ARGS = (os.getenv("CLIPBUILDER_YTDLP_COOKIES_FROM_BROWSER_ARGS") or "").strip()
 
 app = FastAPI(title="ClipBuilder")
+app.include_router(auth_router, prefix="/auth")
 
 app.add_exception_handler(StarletteHTTPException, _http_exception_handler)
 app.add_exception_handler(Exception, _unhandled_exception_handler)
@@ -1842,6 +1846,7 @@ async def export_documentation(
 @app.post("/enhance-document")
 async def enhance_document(
     request: Request,
+    user: CurrentAuthorizedUser,
     x_google_api_key: str | None = Header(default=None, alias="X-Google-Api-Key"),
 ):
     """

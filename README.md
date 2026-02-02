@@ -177,6 +177,8 @@ Além de `GOOGLE_API_KEY`, você pode definir no `backend/.env` (opcional):
 - `GROQ_API_KEY` (chave da API Groq para usar Llama 4 Vision e Whisper Turbo)
 - `ALLOWED_ORIGINS` (lista de origens permitidas para CORS, separadas por vírgula)
 - `CLERK_ISSUER` (URL do emissor Clerk para autenticação JWT, ex.: `https://seu-site.clerk.accounts.dev`)
+- `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` (para envio de e-mails)
+- `FRONTEND_URL` (URL do frontend para links de e-mail, ex.: `http://localhost:5173`)
 
 O Compose já exporta defaults e usa o `backend/.env` via `env_file`.
 

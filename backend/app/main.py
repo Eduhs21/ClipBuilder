@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.router import router as api_router
+from app.auth.router import router as auth_router
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -46,3 +47,4 @@ app.add_middleware(
 )
 
 app.include_router(api_router, prefix="/api")
+app.include_router(auth_router, prefix="/api/auth")

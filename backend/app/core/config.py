@@ -46,6 +46,14 @@ class Settings(BaseSettings):
     jwks_cache_ttl_seconds: int = 3600
     """TTL for in-memory JWKS cache. Avoids fetching from Clerk on every request."""
 
+    # Own JWT auth (python-jose)
+    secret_key: str = "change-me-in-production-use-env-secret"
+    """Secret key for signing our own JWTs. Set SECRET_KEY in production."""
+    jwt_algorithm: str = "HS256"
+    """Algorithm for JWT signing."""
+    access_token_expire_minutes: int = 60 * 24 * 7
+    """Access token expiry in minutes (default 7 days)."""
+
     # CORS
     allowed_origins: list[str] = _DEFAULT_ORIGINS
     """Origins allowed by CORS. Also used for `azp` validation when present."""
